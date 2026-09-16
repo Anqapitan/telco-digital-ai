@@ -29,14 +29,16 @@ prompt = st.text_input(
 )
 
 # Pilihan Model (Sudah diupdate ke model yang lebih pintar)
+# Pilihan Model (Hanya yang GRATIS & PASTI JALAN)
 model = st.selectbox(
     "Pilih Model AI",
     [
-        "google/gemini-1.5-flash-latest",  # ⭐ REKOMENDASI: Web Search + Context Panjang
-        "google/gemini-1.5-pro-latest",    # Alternatif Gemini Pro
-        "meta-llama/Llama-3.3-70b-Instruct" # Alternatif Llama 3.3 (Sangat Pintar)
+        "meta-llama/Llama-3.3-70b-Instruct",      # ⭐ REKOMENDASI: Sangat Pintar, Context Panjang
+        "Qwen/Qwen2.5-72B-Instruct",              # Alternatif: Sangat Bagus untuk Bahasa Indonesia
+        "microsoft/Phi-4-mini-instruct",          # Alternatif: Cepat & Ringan
+        "google/gemma-3-4b-it"                    # Alternatif: Model kecil (yang kemarin)
     ],
-    index=0  # Default ke Gemini Flash
+    index=0  # Default ke Llama 3.3
 )
 
 # Tombol Kirim
