@@ -9,7 +9,7 @@ API_URL = "https://router.huggingface.co/v1/chat/completions"
 
 # Judul & Deskripsi
 st.title("🤖 Telco Digital AI")
-st.caption("Deep-link: `?prompt=...&model=...` | Menggunakan model Gemini 1.5 Flash & Llama 3.3")
+st.caption("Deep-link: `?prompt=...&model=...` | AI model Qwen2.5-72B, Llama-3.1-8B & gemma-3-4b")
 
 # Inisialisasi Session State untuk Prompt (agar tidak hilang saat klik tombol)
 if "prompt_history" not in st.session_state:
