@@ -1,35 +1,83 @@
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="Telco Digital AI")
+# Konfigurasi Halaman
+st.set_page_config(page_title="Telco Digital AI", page_icon="🤖", layout="wide")
 
+# URL API Hugging Face Inference Providers
 API_URL = "https://router.huggingface.co/v1/chat/completions"
 
-st.title("Telco Digital AI")
-st.caption("Deep-link: `?prompt=...&model=...`")
+# Judul & Deskripsi
+st.title("🤖 Telco Digital AI")
+st.caption("Deep-link: `?prompt=...&model=...` | Menggunakan model Gemini 1.5 Flash & Llama 3.3")
 
+# Inisialisasi Session State untuk Prompt (agar tidak hilang saat klik tombol)
+if "prompt_history" not in st.session_state:
+    st.session_state["prompt_history"] = ""
+
+# Baca Query Parameter dari URL (Deep Linking)
 q = st.query_params
-prompt = st.text_input("Prompt", value=q.get("prompt", ""), key="p")
-model = st.selectbox(
-    "Model",
-    ["google/gemma-3-4b-it", "meta-llama/Llama-3.1-8B-Instruct"],
+if "prompt" in q:
+    st.session_state["prompt_history"] = q["prompt"]
+
+# Input Prompt
+prompt = st.text_input(
+    "Masukkan Pertanyaan Anda", 
+    value=st.session_state["prompt_history"], 
+    key="p",
+    placeholder="Contoh: Apa itu 5G? Bagaimana cara kerja Fiber Optic?"
 )
 
-if st.button("Kirim ke AI", type="primary"):
-    try:
-        with st.spinner("Memproses..."):
-            payload = {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 300,
-            }
-            headers = {
-                "Authorization": f"Bearer {st.secrets['HF_TOKEN']}"
-            }
-            response = requests.post(API_URL, json=payload, headers=headers, timeout=60)
-            response.raise_for_status()
-            result = response.json()["choices"][0]["message"]["content"]
-            st.markdown(result)
-            st.query_params["prompt"] = prompt
-    except Exception as e:
-        st.error(f"Error: {e}")
+# Pilihan Model (Sudah diupdate ke model yang lebih pintar)
+model = st.selectbox(
+    "Pilih Model AI",
+    [
+        "google/gemini-1.5-flash-latest",  # ⭐ REKOMENDASI: Web Search + Context Panjang
+        "google/gemini-1.5-pro-latest",    # Alternatif Gemini Pro
+        "meta-llama/Llama-3.3-70b-Instruct" # Alternatif Llama 3.3 (Sangat Pintar)
+    ],
+    index=0  # Default ke Gemini Flash
+)
+
+# Tombol Kirim
+if st.button("Kirim ke AI", type="primary", use_container_width=True):
+    if not prompt.strip():
+        st.warning("⚠️ Mohon isi pertanyaan terlebih dahulu.")
+    else:
+        try:
+            with st.spinner("Sedang berpikir dan mencari informasi di web..."):
+                # Payload ke API
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 8192,  # Token lebih banyak agar jawaban panjang
+                    "temperature": 0.7,  # Kreativitas jawaban
+                }
+                
+                # Header (Gunakan Secret Token)
+                headers = {
+                    "Authorization": f"Bearer {st.secrets['HF_TOKEN']}",
+                    "Content-Type": "application/json"
+                }
+                
+                # Request ke API
+                response = requests.post(API_URL, json=payload, headers=headers, timeout=120)
+                response.raise_for_status()
+                
+                # Ambil Jawaban
+                result_data = response.json()
+                answer = result_data["choices"][0]["message"]["content"]
+                
+                # Tampilkan Jawaban
+                st.markdown("### ✅ Jawaban:")
+                st.markdown(answer)
+                
+                # Update URL dengan prompt terakhir (agar bisa dibagikan lagi)
+                st.query_params["prompt"] = prompt
+                
+                # Simpan ke history
+                st.session_state["prompt_history"] = prompt
+                
+        except Exception as e:
+            st.error(f"❌ Terjadi kesalahan: {e}")
+            st.info("💡 Pastikan token HF_TOKEN sudah diset di menu 'Secrets' di Streamlit.")
