@@ -33,12 +33,12 @@ prompt = st.text_input(
 model = st.selectbox(
     "Pilih Model AI",
     [
-        "meta-llama/Llama-3.3-70b-Instruct",      # ⭐ REKOMENDASI: Sangat Pintar, Context Panjang
-        "Qwen/Qwen2.5-72B-Instruct",              # Alternatif: Sangat Bagus untuk Bahasa Indonesia
-        "microsoft/Phi-4-mini-instruct",          # Alternatif: Cepat & Ringan
+        "Qwen/Qwen2.5-72B-Instruct",              # ⭐ REKOMENDASI: Sangat Bagus untuk Bahasa Indonesia
+        "meta-llama/Llama-3.1-8B-Instruct",       # Alternatif: Cepat & Standar
+        "google/gemma-2-9b-it",                   # Alternatif: Ringan & Cepat
         "google/gemma-3-4b-it"                    # Alternatif: Model kecil (yang kemarin)
     ],
-    index=0  # Default ke Llama 3.3
+    index=0  # ⭐ DEFAULT ke Qwen2.5-72B-Instruct
 )
 
 # Tombol Kirim
