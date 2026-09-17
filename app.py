@@ -12,7 +12,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-
 # ============================================================
 # CSS RESPONSIVE
 # ============================================================
@@ -164,13 +163,11 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
 # ============================================================
 # API CONFIGURATION
 # ============================================================
 
 API_URL = "https://router.huggingface.co/v1/chat/completions"
-
 
 # ============================================================
 # DAFTAR MODEL
@@ -183,7 +180,6 @@ MODELS = [
     "google/gemma-3-4b-it",
 ]
 
-
 # ============================================================
 # SESSION STATE
 # ============================================================
@@ -193,7 +189,6 @@ if "prompt_history" not in st.session_state:
 
 if "model_selected" not in st.session_state:
     st.session_state["model_selected"] = MODELS[0]
-
 
 # ============================================================
 # DEEP LINKING
@@ -206,7 +201,6 @@ if "model_selected" not in st.session_state:
 # ============================================================
 
 q = st.query_params
-
 
 if "prompt" in q:
 
@@ -222,7 +216,6 @@ if "model" in q:
 
     if deep_link_model in MODELS:
         st.session_state["model_selected"] = deep_link_model
-
 
 # ============================================================
 # HEADER
@@ -247,7 +240,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
 # ============================================================
 # INPUT PROMPT
 # ============================================================
@@ -266,7 +258,6 @@ prompt = st.text_area(
     ),
     key="p"
 )
-
 
 # ============================================================
 # PILIH MODEL AI
@@ -293,10 +284,8 @@ model = st.selectbox(
     )
 )
 
-
 # Update session state apabila user mengganti model
 st.session_state["model_selected"] = model
-
 
 # ============================================================
 # INFO MODEL
@@ -306,7 +295,6 @@ st.caption(
     f"Model aktif: **{model}** | "
     "Bahasa respons default: **Bahasa Indonesia**"
 )
-
 
 # ============================================================
 # TOMBOL TANYA AI
@@ -329,7 +317,6 @@ if st.button(
         )
 
         st.stop()
-
 
     # --------------------------------------------------------
     # SYSTEM PROMPT
@@ -370,7 +357,6 @@ ATURAN KUALITAS:
   Technology, Project, Risk, Governance dan O&M apabila relevan.
 """
 
-
     # ========================================================
     # PAYLOAD API
     # ========================================================
@@ -394,7 +380,6 @@ ATURAN KUALITAS:
 
         "temperature": 0.7
     }
-
 
     # ========================================================
     # HEADER
@@ -426,7 +411,6 @@ ATURAN KUALITAS:
         "Accept": "application/json"
     }
 
-
     # ========================================================
     # REQUEST KE HUGGING FACE
     # ========================================================
@@ -444,13 +428,11 @@ ATURAN KUALITAS:
                 timeout=120
             )
 
-
         # ----------------------------------------------------
         # ERROR HTTP
         # ----------------------------------------------------
 
         response.raise_for_status()
-
 
         # ----------------------------------------------------
         # PARSE RESPONSE
@@ -478,7 +460,6 @@ ATURAN KUALITAS:
 
             st.stop()
 
-
         answer = (
             result_data["choices"][0]
             .get("message", {})
@@ -493,7 +474,6 @@ ATURAN KUALITAS:
             )
 
             st.stop()
-
 
         # ====================================================
         # TAMPILKAN JAWABAN
@@ -515,7 +495,6 @@ ATURAN KUALITAS:
             unsafe_allow_html=True
         )
 
-
         # ====================================================
         # UPDATE SESSION STATE
         # ====================================================
@@ -523,7 +502,6 @@ ATURAN KUALITAS:
         st.session_state["prompt_history"] = prompt
 
         st.session_state["model_selected"] = model
-
 
         # ====================================================
         # UPDATE URL / DEEP LINK
@@ -533,7 +511,6 @@ ATURAN KUALITAS:
 
         st.query_params["model"] = model
 
-
         # ====================================================
         # INFORMASI MODEL
         # ====================================================
@@ -542,7 +519,6 @@ ATURAN KUALITAS:
             f"Model: `{model}` | "
             "Response language: `Bahasa Indonesia`"
         )
-
 
     # ========================================================
     # ERROR HANDLING
@@ -584,7 +560,6 @@ ATURAN KUALITAS:
         st.error(
             f"❌ Network/API error: {e}"
         )
-
 
     except Exception as e:
 
