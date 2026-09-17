@@ -1,15 +1,11 @@
 """
-ID Telco Digital AI Assistant - v3 (Enhanced)
-================================================
-Changelog vs v2:
-- Behavior access logging → CSV di Google Drive (shared folder admin) via service account
-- Soft error handling production-ready
-- Chat memory lintas session (session_id + optional load/save)
-- Export PDF (fpdf2)
-- Mermaid / diagram rendering (st.markdown + optional component)
-- Improved specialized APAC search + static key-facts fallback dari konten aktual dashboard (Sep 2026)
-- Refactor high-risk parts (token, payload, timeout, input sanitization, exception boundaries)
-- IP / country approximation + origin tracking
+ID Telco Digital AI Assistant - v4 (Supabase Logging)
+=====================================================
+Changelog vs v3:
+- HAPUS semua Google Cloud / gspread / service account
+- Logging behavior diganti ke Supabase (free tier) – sangat mudah & gratis
+- Soft-fail tetap: aplikasi jalan meski Supabase belum dikonfigurasi
+- Sisanya sama: PDF export, Mermaid, specialized search + KEY FACTS, soft error, dll.
 """
 
 import requests
@@ -19,12 +15,8 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 import json
 import re
-import csv
-import io
-import hashlib
 import uuid
 import traceback
-from pathlib import Path
 
 # Optional dependencies with graceful fallback
 try:
@@ -40,11 +32,10 @@ except ImportError:
     BS4_AVAILABLE = False
 
 try:
-    import gspread
-    from google.oauth2.service_account import Credentials
-    GSPREAD_AVAILABLE = True
+    from supabase import create_client, Client
+    SUPABASE_AVAILABLE = True
 except ImportError:
-    GSPREAD_AVAILABLE = False
+    SUPABASE_AVAILABLE = False
 
 try:
     from fpdf import FPDF
@@ -57,7 +48,7 @@ except ImportError:
 # ============================================================
 
 API_URL = "https://router.huggingface.co/v1/chat/completions"
-APP_VERSION = "3.0.0"
+APP_VERSION = "4.0.0"
 MAX_LOG_PROMPT_LEN = 800
 MAX_LOG_ANSWER_LEN = 1500
 
@@ -244,8 +235,6 @@ SPECIALIZED_SOURCES = {
     }
 }
 
-# Static key facts extracted from live dashboards (mid-Sep 2026 snapshot)
-# Used as high-priority fallback when scrape/DDG yield little
 KEY_FACTS_DC = """
 === KEY FACTS LIVE DC ASPAC (snapshot ~Sep 2026, sumber dashboard kurasi) ===
 - CoreWeave mengumumkan data center pertamanya di Asia-Pacific di Indonesia (fokus Batam) — validasi posisi RI dalam rantai pasok komputasi AI.
@@ -269,24 +258,20 @@ Periode fokus dashboard: ~16 Jun – 16 Sep 2026. Selalu sebutkan URL dashboard 
 """
 
 # ============================================================
-# UTILS: Soft helpers
+# UTILS
 # ============================================================
 
 def safe_get_ip_and_country() -> Tuple[str, str]:
-    """Approximate client IP + country. Soft-fail to unknown."""
     ip = "unknown"
     country = "unknown"
     try:
-        # Streamlit Cloud / headers
         headers = st.context.headers if hasattr(st, "context") and st.context else {}
-        # Common proxy headers
         for key in ["X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP", "True-Client-IP"]:
             val = headers.get(key) or headers.get(key.lower())
             if val:
                 ip = str(val).split(",")[0].strip()
                 break
         if ip == "unknown":
-            # Fallback via free geo (rate-limited, soft)
             try:
                 r = requests.get("https://ipapi.co/json/", timeout=3)
                 if r.status_code == 200:
@@ -296,7 +281,6 @@ def safe_get_ip_and_country() -> Tuple[str, str]:
             except Exception:
                 pass
         else:
-            # Try country from IP
             try:
                 r = requests.get(f"https://ipapi.co/{ip}/json/", timeout=3)
                 if r.status_code == 200:
@@ -311,7 +295,6 @@ def safe_get_ip_and_country() -> Tuple[str, str]:
 
 def get_origin_url() -> str:
     try:
-        # Streamlit query / referrer approximation
         params = st.query_params
         base = "https://telco-digital-ai.streamlit.app"
         if params:
@@ -336,68 +319,40 @@ def sanitize_text(text: str, max_len: int = 4000) -> str:
 
 
 # ============================================================
-# GOOGLE DRIVE LOGGING (soft-fail)
+# SUPABASE LOGGING (pengganti Google Cloud) – soft-fail
 # ============================================================
 
-def get_gspread_client():
-    """Return authorized gspread client or None."""
-    if not GSPREAD_AVAILABLE:
+def get_supabase_client() -> Optional["Client"]:
+    """Return Supabase client or None if not configured / library missing."""
+    if not SUPABASE_AVAILABLE:
         return None
     try:
-        # Expect st.secrets["gcp_service_account"] as dict (JSON key)
-        sa_info = st.secrets.get("gcp_service_account")
-        if not sa_info:
+        url = st.secrets.get("SUPABASE_URL")
+        key = st.secrets.get("SUPABASE_KEY")  # anon atau service_role
+        if not url or not key:
             return None
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
-        return gspread.authorize(creds)
+        return create_client(url, key)
     except Exception:
         return None
 
 
 def append_behavior_log(row: Dict[str, Any]) -> bool:
     """
-    Append one log row to a Google Sheet (shared folder admin).
-    Sheet name expected: "TelcoAI_AccessLog" or configured via secrets.
-    Soft-fail: never break the main app.
+    Insert one log row ke tabel 'access_logs' di Supabase.
+    Soft-fail total.
     """
     try:
-        client = get_gspread_client()
+        client = get_supabase_client()
         if client is None:
             return False
 
-        sheet_key = st.secrets.get("GDRIVE_LOG_SHEET_KEY") or st.secrets.get("gdrive_log_sheet_key")
-        if not sheet_key:
-            return False
-
-        sh = client.open_by_key(sheet_key)
-        # Prefer first worksheet or named "AccessLog"
-        try:
-            ws = sh.worksheet("AccessLog")
-        except Exception:
-            ws = sh.sheet1
-
-        # Ensure header exists
-        headers = [
-            "timestamp_utc", "session_id", "ip", "country", "origin_url",
-            "feature", "model", "prompt_snippet", "answer_snippet",
-            "files_uploaded", "web_search_used", "specialized_used",
-            "user_agent", "app_version", "error_note"
-        ]
-        existing = ws.row_values(1)
-        if not existing or existing[0] != "timestamp_utc":
-            ws.insert_row(headers, 1)
-
-        values = [str(row.get(h, "")) for h in headers]
-        ws.append_row(values, value_input_option="USER_ENTERED")
+        # Pastikan semua value string / serializable
+        clean = {k: ("" if v is None else str(v)) for k, v in row.items()}
+        client.table("access_logs").insert(clean).execute()
         return True
     except Exception as e:
-        # Soft fail — do not surface to user unless debug
         if st.session_state.get("debug_mode"):
-            st.warning(f"[Log] Gagal tulis ke Drive: {e}")
+            st.warning(f"[Log] Gagal tulis ke Supabase: {e}")
         return False
 
 
@@ -440,7 +395,7 @@ def log_access(
         }
         append_behavior_log(row)
     except Exception:
-        pass  # absolute soft
+        pass
 
 
 # ============================================================
@@ -467,15 +422,8 @@ def web_search(query: str, max_results: int = 5) -> str:
 
 
 def specialized_apac_search(user_query: str, max_results: int = 6) -> str:
-    """
-    Improved specialized search:
-    - Always inject primary sources + KEY_FACTS (real snapshot Sep 2026)
-    - Aggressive site: + keyword expansion from actual dashboard content
-    - Soft fallback
-    """
     output_parts = []
 
-    # 1. Primary source injection + key facts (high priority)
     output_parts.append(
         "=== SUMBER KURASI PRIMER (PRIORITAS TINGGI) ===\n"
         "Gunakan informasi terkini dari dashboard live berikut sebagai referensi utama "
@@ -497,7 +445,6 @@ def specialized_apac_search(user_query: str, max_results: int = 6) -> str:
         )
         return "\n".join(output_parts)
 
-    # 2. Targeted queries (improved with real keywords)
     site_queries = [
         f'site:narational.byethost11.com ({user_query})',
         'site:narational.byethost11.com (CoreWeave OR Firmus OR "Nongsa-Changi" OR Echo OR WaveLogic OR BATIC OR "grid readiness")',
@@ -575,7 +522,6 @@ def specialized_apac_search(user_query: str, max_results: int = 6) -> str:
 
 
 def try_scrape_dashboard(url: str, max_chars: int = 2500) -> str:
-    """Kept for future; currently returns empty on JS pages."""
     if not BS4_AVAILABLE:
         return ""
     try:
@@ -622,7 +568,6 @@ def create_pdf_from_history(history: List[Dict], title: str = "Riwayat Chat - ID
             pdf.set_font("Helvetica", "B", 11)
             pdf.cell(0, 8, f"[{item.get('time', '')}] {role} ({item.get('model', '')})", ln=True)
             pdf.set_font("Helvetica", "", 10)
-            # Simple text wrap; strip markdown-ish
             content = re.sub(r"[*_`#]", "", item.get("content", ""))[:3000]
             pdf.multi_cell(0, 6, content)
             pdf.ln(4)
@@ -640,7 +585,6 @@ def create_pdf_from_history(history: List[Dict], title: str = "Riwayat Chat - ID
 # ============================================================
 
 def extract_and_render_mermaid(text: str):
-    """Extract ```mermaid blocks and render via HTML (mermaid.js CDN)."""
     pattern = r"```mermaid\s*([\s\S]*?)```"
     matches = re.findall(pattern, text, re.IGNORECASE)
     if not matches:
@@ -648,7 +592,6 @@ def extract_and_render_mermaid(text: str):
     st.markdown("#### Diagram Mermaid terdeteksi")
     for i, code in enumerate(matches):
         code = code.strip()
-        # Render via mermaid.js
         mermaid_html = f"""
         <div class="mermaid" id="mermaid-{i}">
         {code}
@@ -679,9 +622,6 @@ if "debug_mode" not in st.session_state:
     st.session_state["debug_mode"] = False
 if "session_id" not in st.session_state:
     generate_session_id()
-
-# Cross-session memory note: true persistence needs external store.
-# We keep rich session history + allow download / PDF. Optional future: load from Drive.
 
 # ============================================================
 # DEEP LINKING
@@ -747,7 +687,10 @@ with st.expander("⚙️ Pengaturan Web Search, Logging & Fitur Lanjutan", expan
         )
 
     st.session_state["debug_mode"] = st.checkbox("Debug mode (tampilkan error detail)", value=False)
-    st.caption(f"Session ID: `{st.session_state.get('session_id', '-')}` • Logging ke Google Drive: {'Aktif' if GSPREAD_AVAILABLE else 'Tidak tersedia (install gspread + secrets)'}")
+
+    # Status logging
+    supabase_status = "Aktif" if get_supabase_client() else "Belum dikonfigurasi (isi SUPABASE_URL + SUPABASE_KEY di Secrets)"
+    st.caption(f"Session ID: `{st.session_state.get('session_id', '-')}` • Logging ke Supabase: **{supabase_status}**")
 
 # ============================================================
 # MODEL SELECT
@@ -814,7 +757,6 @@ if st.button("🚀 Tanya AI", type="primary", use_container_width=True):
         st.warning("⚠️ Mohon isi pertanyaan terlebih dahulu.")
         st.stop()
 
-    # Log start of query
     log_access(
         feature="query_start",
         prompt=prompt.strip(),
@@ -824,7 +766,6 @@ if st.button("🚀 Tanya AI", type="primary", use_container_width=True):
         specialized=st.session_state["enable_specialized_apac"]
     )
 
-    # ---------- System Prompt ----------
     system_prompt = """
 Anda adalah Telco Digital AI, asisten profesional di bidang Telecommunications, ICT, 
 Digital Transformation, Data Center, Fiber Optic, Submarine Cable, 5G, Satellite, 
@@ -843,7 +784,6 @@ ATURAN WAJIB:
 7. Jika ada error atau data tidak lengkap, sampaikan secara transparan tanpa mengarang fakta.
 """
 
-    # ---------- Build search context ----------
     search_context_parts = []
     specialized_used = False
     web_used = False
@@ -874,7 +814,6 @@ ATURAN WAJIB:
 
     search_context = "\n".join(search_context_parts) if search_context_parts else ""
 
-    # ---------- Messages ----------
     user_content = []
     final_prompt = prompt.strip()
     if search_context:
@@ -893,7 +832,6 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
 
     user_content.append({"type": "text", "text": final_prompt})
 
-    # File handling (safe)
     if uploaded_files:
         for f in uploaded_files:
             try:
@@ -926,7 +864,6 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
         "temperature": 0.7
     }
 
-    # ---------- Call API (soft error) ----------
     try:
         hf_token = st.secrets["HF_TOKEN"]
     except Exception:
@@ -948,7 +885,6 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
         result = response.json()
         answer = result["choices"][0]["message"]["content"]
 
-        # Save history
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         st.session_state["chat_history"].append({
             "role": "user", "content": prompt.strip(), "model": model, "time": now
@@ -962,7 +898,6 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
         st.markdown(answer)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Try render Mermaid if present
         try:
             extract_and_render_mermaid(answer)
         except Exception:
@@ -976,7 +911,6 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
         st.query_params["prompt"] = prompt
         st.query_params["model"] = model
 
-        # Success log
         log_access(
             feature="query_success",
             prompt=prompt.strip(),
@@ -1046,7 +980,6 @@ if st.session_state["chat_history"]:
     with col3:
         st.download_button("⬇️ WhatsApp", history_wa, f"chat_wa_{datetime.now().strftime('%Y%m%d_%H%M')}.txt", "text/plain", use_container_width=True)
     with col4:
-        # PDF
         pdf_bytes = create_pdf_from_history(st.session_state["chat_history"])
         if pdf_bytes:
             st.download_button(
@@ -1064,10 +997,9 @@ if st.session_state["chat_history"]:
             log_access(feature="clear_history")
             st.rerun()
 
-# Footer soft note
 st.markdown("---")
 st.caption(
     f"ID Telco Digital AI v{APP_VERSION} • Session: {st.session_state.get('session_id', '-')} • "
-    "Logging behavior ke Google Drive (jika secrets dikonfigurasi). "
+    "Logging behavior ke Supabase (jika secrets dikonfigurasi). "
     "Sumber kurasi: Live DC & FO/Subsea ASPAC oleh nap@iicf.or.id."
 )
