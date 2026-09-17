@@ -967,32 +967,32 @@ if st.session_state["chat_history"]:
     st.markdown("---")
     st.subheader("📜 Riwayat Percakapan (Session ini)")
 
-    history_html = ""
+    # Bangun teks untuk download (tanpa HTML)
     history_md = "# Riwayat Chat - ID Telco Digital AI\n\n"
     history_plain = ""
     history_wa = ""
 
+    # Tampilkan riwayat dengan komponen native Streamlit (bersih, tanpa tag HTML)
     for item in st.session_state["chat_history"]:
-        role_label = "👤 ANDA" if item["role"] == "user" else "🤖 AI"
-        role_color = "#00ff9f" if item["role"] == "user" else "#ffcc00"
+        role = item["role"]
+        role_label = "👤 ANDA" if role == "user" else "🤖 AI"
+        role_plain = "Anda" if role == "user" else "AI"
 
-        history_html += f"""
-        <div style="margin-bottom:1.1rem;">
-            <strong style="color:{role_color}">{role_label}</strong>
-            <span style="color:#7ec8ff;font-size:0.82rem;">({item['time']})</span>
-            <code>{item['model']}</code><br><br>
-            <div style="color:#ffff00;white-space:pre-wrap;">{item['content']}</div>
-        </div>
-        <hr style="border:none;border-top:1px dashed #00bfff;margin:1.1rem 0;">
-        """
+        # Header ringkas
+        st.markdown(f"**{role_label}**  ·  `{item.get('time', '')}`  ·  `{item.get('model', '')}`")
 
+        # Isi pesan (markdown biasa, aman)
+        with st.container(border=True):
+            st.markdown(item.get("content", ""))
+
+        st.markdown("")  # spasi antar pesan
+
+        # Siapkan file download
         history_md += f"**{role_label}** ({item['time']}) — `{item['model']}`\n\n{item['content']}\n\n---\n\n"
-        role_plain = "Anda" if item["role"] == "user" else "AI"
         history_plain += f"[{item['time']}] {role_plain} ({item['model']}):\n{item['content']}\n\n"
         history_wa += f"*{role_plain}* ({item['time']})\n{item['content']}\n\n"
 
-    st.markdown(f'<div class="history-box">{history_html}</div>', unsafe_allow_html=True)
-
+    # Tombol export
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.download_button("⬇️ Markdown", history_md, f"chat_{datetime.now().strftime('%Y%m%d_%H%M')}.md", "text/markdown", use_container_width=True)
