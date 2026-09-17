@@ -15,6 +15,12 @@ except ImportError:
     DDG_AVAILABLE = False
 
 # ============================================================
+# API CONFIGURATION
+# ============================================================
+
+API_URL = "https://router.huggingface.co/v1/chat/completions"   # ← pastikan baris ini ada
+
+# ============================================================
 # LOGO SVG INLINE
 # ============================================================
 
