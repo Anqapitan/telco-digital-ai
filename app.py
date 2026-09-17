@@ -293,16 +293,45 @@ def safe_get_ip_and_country() -> Tuple[str, str]:
     return ip, country
 
 
-def get_origin_url() -> str:
+def get_external_referrer() -> str:
+    """
+    Deteksi situs eksternal yang mengirimkan user ke app ini (via header Referer).
+    - Jika datang dari situs luar → kembalikan URL referrer tersebut.
+    - Jika buka langsung dari telco-digital-ai.streamlit.app (atau referrer kosong/internal) → kembalikan string kosong.
+    """
     try:
-        params = st.query_params
-        base = "https://telco-digital-ai.streamlit.app"
-        if params:
-            q = "&".join(f"{k}={v}" for k, v in params.items())
-            return f"{base}?{q}"
-        return base
+        headers = {}
+        if hasattr(st, "context") and st.context:
+            headers = st.context.headers or {}
+
+        # Ambil Referer (berbagai kemungkinan kapitalisasi)
+        referer = (
+            headers.get("Referer")
+            or headers.get("referer")
+            or headers.get("Referrer")
+            or headers.get("referrer")
+            or ""
+        )
+        referer = str(referer).strip()
+
+        if not referer:
+            return ""
+
+        # Abaikan jika referrer berasal dari app sendiri
+        own_domains = [
+            "telco-digital-ai.streamlit.app",
+            "localhost",
+            "127.0.0.1",
+            "streamlit.app",
+        ]
+        referer_lower = referer.lower()
+        if any(d in referer_lower for d in own_domains):
+            return ""
+
+        # Batasi panjang agar aman
+        return referer[:500]
     except Exception:
-        return "https://telco-digital-ai.streamlit.app"
+        return ""
 
 
 def generate_session_id() -> str:
@@ -381,7 +410,7 @@ def log_access(
             "session_id": generate_session_id(),
             "ip": ip,
             "country": country,
-            "origin_url": get_origin_url(),
+            "origin_url": get_external_referrer(),
             "feature": feature,
             "model": model,
             "prompt_snippet": sanitize_text(prompt, MAX_LOG_PROMPT_LEN),
@@ -918,9 +947,9 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
         except Exception:
             _ip, _country = "unknown", "unknown"
         try:
-            _origin = get_origin_url()
+            _origin = get_external_referrer()  # hanya situs eksternal, kosong jika buka langsung
         except Exception:
-            _origin = "unknown"
+            _origin = ""
 
         st.session_state["chat_history"].append({
             "role": "user",
@@ -1004,13 +1033,14 @@ if st.session_state["chat_history"]:
         role = item["role"]
         ip = item.get("ip", "unknown")
         country = item.get("country", "unknown")
-        origin = item.get("origin_url", "unknown")
+        origin = item.get("origin_url", "") or ""
 
         if role == "user":
-            # Tampilkan IP · Region · Origin URL (lebih informatif daripada "ANDA")
+            # Tampilkan IP · Region (lebih informatif daripada "ANDA")
             role_label = f"👤 [{ip}] · [{country}]"
             role_plain = f"[{ip}] [{country}]"
-            extra_info = f"Origin: `{origin}`"
+            # Hanya tampilkan Origin jika datang dari situs eksternal
+            extra_info = f"🔗 Dari: `{origin}`" if origin else ""
         else:
             role_label = "🤖 AI"
             role_plain = "AI"
@@ -1029,12 +1059,12 @@ if st.session_state["chat_history"]:
 
         # Siapkan file download
         history_md += f"**{role_label}** ({item['time']}) — `{item['model']}`\n"
-        if origin and origin != "unknown":
-            history_md += f"Origin: {origin}\n"
+        if origin:
+            history_md += f"Dari: {origin}\n"
         history_md += f"\n{item['content']}\n\n---\n\n"
         history_plain += f"[{item['time']}] {role_plain} ({item['model']}):\n"
-        if origin and origin != "unknown":
-            history_plain += f"Origin: {origin}\n"
+        if origin:
+            history_plain += f"Dari: {origin}\n"
         history_plain += f"{item['content']}\n\n"
         history_wa += f"*{role_plain}* ({item['time']})\n{item['content']}\n\n"
 
