@@ -551,6 +551,7 @@ def try_scrape_dashboard(url: str, max_chars: int = 2500) -> str:
 # ============================================================
 
 def create_pdf_from_history(history: List[Dict], title: str = "Riwayat Chat - ID Telco Digital AI") -> Optional[bytes]:
+    """Generate PDF as pure bytes. Soft-fail on any error."""
     if not FPDF_AVAILABLE:
         return None
     try:
@@ -558,24 +559,44 @@ def create_pdf_from_history(history: List[Dict], title: str = "Riwayat Chat - ID
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
         pdf.set_font("Helvetica", "B", 16)
-        pdf.cell(0, 10, title, ln=True)
+        # fpdf2 baru memakai new_x/new_y, fallback ln=True masih didukung di banyak versi
+        try:
+            pdf.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT")
+        except TypeError:
+            pdf.cell(0, 10, title, ln=True)
         pdf.set_font("Helvetica", "", 10)
-        pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | App v{APP_VERSION}", ln=True)
+        gen_line = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | App v{APP_VERSION}"
+        try:
+            pdf.cell(0, 8, gen_line, new_x="LMARGIN", new_y="NEXT")
+        except TypeError:
+            pdf.cell(0, 8, gen_line, ln=True)
         pdf.ln(5)
 
         for item in history:
             role = "ANDA" if item["role"] == "user" else "AI"
+            header = f"[{item.get('time', '')}] {role} ({item.get('model', '')})"
             pdf.set_font("Helvetica", "B", 11)
-            pdf.cell(0, 8, f"[{item.get('time', '')}] {role} ({item.get('model', '')})", ln=True)
+            try:
+                pdf.cell(0, 8, header, new_x="LMARGIN", new_y="NEXT")
+            except TypeError:
+                pdf.cell(0, 8, header, ln=True)
             pdf.set_font("Helvetica", "", 10)
-            content = re.sub(r"[*_`#]", "", item.get("content", ""))[:3000]
+            # Bersihkan karakter di luar latin-1 agar fpdf tidak crash
+            content = re.sub(r"[*_`#]", "", str(item.get("content", "")))[:3000]
+            content = content.encode("latin-1", errors="replace").decode("latin-1")
             pdf.multi_cell(0, 6, content)
             pdf.ln(4)
             pdf.set_draw_color(180, 180, 180)
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
             pdf.ln(4)
 
-        return pdf.output()
+        # Pastikan selalu return bytes murni
+        raw = pdf.output(dest="S")
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        if isinstance(raw, str):
+            return raw.encode("latin-1")
+        return None
     except Exception:
         return None
 
@@ -980,17 +1001,21 @@ if st.session_state["chat_history"]:
     with col3:
         st.download_button("⬇️ WhatsApp", history_wa, f"chat_wa_{datetime.now().strftime('%Y%m%d_%H%M')}.txt", "text/plain", use_container_width=True)
     with col4:
-        pdf_bytes = create_pdf_from_history(st.session_state["chat_history"])
-        if pdf_bytes:
-            st.download_button(
-                "⬇️ PDF",
-                data=pdf_bytes,
-                file_name=f"chat_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-        else:
-            st.button("⬇️ PDF (fpdf2 belum terinstall)", disabled=True, use_container_width=True)
+        try:
+            pdf_bytes = create_pdf_from_history(st.session_state["chat_history"])
+            if pdf_bytes and isinstance(pdf_bytes, (bytes, bytearray)) and len(pdf_bytes) > 100:
+                st.download_button(
+                    label="⬇️ PDF",
+                    data=bytes(pdf_bytes),
+                    file_name=f"chat_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="btn_pdf_download"
+                )
+            else:
+                st.button("⬇️ PDF (tidak tersedia)", disabled=True, use_container_width=True, key="btn_pdf_disabled")
+        except Exception:
+            st.button("⬇️ PDF (error)", disabled=True, use_container_width=True, key="btn_pdf_error")
     with col5:
         if st.button("🗑️ Hapus Riwayat", use_container_width=True):
             st.session_state["chat_history"] = []
