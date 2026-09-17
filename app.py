@@ -763,6 +763,8 @@ if "enable_specialized_apac" not in st.session_state:
     st.session_state["enable_specialized_apac"] = True
 if "debug_mode" not in st.session_state:
     st.session_state["debug_mode"] = False
+if "preferred_provider" not in st.session_state:
+    st.session_state["preferred_provider"] = "auto"  # auto | hf | groq | openrouter
 if "session_id" not in st.session_state:
     generate_session_id()
 
@@ -775,6 +777,8 @@ if "prompt" in q and q["prompt"]:
     st.session_state["prompt_history"] = q["prompt"]
 if "model" in q and q["model"] in MODELS:
     st.session_state["model_selected"] = q["model"]
+if "provider" in q and q["provider"] in ("auto", "hf", "groq", "openrouter"):
+    st.session_state["preferred_provider"] = q["provider"]
 
 # ============================================================
 # HEADER
@@ -831,9 +835,35 @@ with st.expander("⚙️ Pengaturan Web Search, Logging & Fitur Lanjutan", expan
 
     st.session_state["debug_mode"] = st.checkbox("Debug mode (tampilkan error detail)", value=False)
 
-    # Status logging
-    supabase_status = "Aktif" if get_supabase_client() else "Belum dikonfigurasi (isi SUPABASE_URL + SUPABASE_KEY di Secrets)"
-    st.caption(f"Session ID: `{st.session_state.get('session_id', '-')}` • Logging ke Supabase: **{supabase_status}**")
+    # Provider preference (smart fallback control)
+    provider_options = {
+        "auto": "Auto (HF → Groq → OpenRouter)",
+        "hf": "Hugging Face saja",
+        "groq": "Groq saja (gratis, cepat)",
+        "openrouter": "OpenRouter saja",
+    }
+    current_prov = st.session_state.get("preferred_provider", "auto")
+    if current_prov not in provider_options:
+        current_prov = "auto"
+    chosen = st.selectbox(
+        "Preferensi Provider AI",
+        options=list(provider_options.keys()),
+        index=list(provider_options.keys()).index(current_prov),
+        format_func=lambda x: provider_options[x],
+        help="Jika HF kredit habis (402), pilih Groq/OpenRouter atau biarkan Auto."
+    )
+    st.session_state["preferred_provider"] = chosen
+
+    # Status logging + keys
+    supabase_status = "Aktif" if get_supabase_client() else "Belum dikonfigurasi"
+    has_groq = bool(st.secrets.get("GROQ_API_KEY") or st.secrets.get("groq_api_key"))
+    has_or = bool(st.secrets.get("OPENROUTER_API_KEY") or st.secrets.get("openrouter_api_key"))
+    st.caption(
+        f"Session: `{st.session_state.get('session_id', '-')}` · "
+        f"Supabase: **{supabase_status}** · "
+        f"Groq key: {'✅' if has_groq else '❌'} · "
+        f"OpenRouter key: {'✅' if has_or else '❌'}"
+    )
 
 # ============================================================
 # MODEL SELECT
@@ -845,12 +875,24 @@ try:
 except Exception:
     model_index = 0
 
+def _model_label(m: str) -> str:
+    """Label model + provider yang tersedia untuk model tersebut."""
+    info = MODEL_INFO.get(m, "")
+    providers = ["HF"]
+    # Semua model punya mapping Groq & OpenRouter di fallback
+    if m in GROQ_MODEL_MAP:
+        providers.append(f"Groq→{GROQ_MODEL_MAP[m]}")
+    if m in OPENROUTER_MODEL_MAP:
+        providers.append(f"OR→{OPENROUTER_MODEL_MAP[m]}")
+    prov_str = " | ".join(providers)
+    return f"{m}  ·  [{prov_str}]  →  {info}"
+
 model = st.selectbox(
     "Pilih Model AI",
     options=MODELS,
     index=model_index,
-    format_func=lambda x: f"{x}  →  {MODEL_INFO.get(x, '')}",
-    help="Model multimodal akan menampilkan opsi upload file."
+    format_func=_model_label,
+    help="Keterangan [HF | Groq→... | OR→...] = provider yang bisa dipakai (Auto fallback saat HF 402)."
 )
 st.session_state["model_selected"] = model
 cap = MODEL_CAPABILITIES.get(model, {"type": "text"})
@@ -1042,79 +1084,173 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
     used_provider = "huggingface"
     used_model = model
     last_error = ""
+    pref = st.session_state.get("preferred_provider", "auto")
 
     try:
-        with st.spinner("🤖 AI sedang memproses (Hugging Face)..."):
-            hf_token = st.secrets.get("HF_TOKEN") or st.secrets.get("hf_token")
-            if not hf_token:
-                last_error = "HF_TOKEN_MISSING"
-            else:
-                answer, last_error = _call_provider(
-                    API_URL_HF, hf_token, model, messages_multimodal
+        hf_token = st.secrets.get("HF_TOKEN") or st.secrets.get("hf_token")
+        groq_key = st.secrets.get("GROQ_API_KEY") or st.secrets.get("groq_api_key")
+        or_key = st.secrets.get("OPENROUTER_API_KEY") or st.secrets.get("openrouter_api_key")
+
+        # --- Urutan provider berdasarkan preferensi ---
+        # Jika session sudah tahu HF 402, prioritaskan Groq dulu (hemat waktu)
+        hf_exhausted = st.session_state.get("hf_credits_exhausted", False)
+        try_hf = pref in ("auto", "hf")
+        try_groq = pref in ("auto", "groq") and bool(groq_key)
+        try_or = pref in ("auto", "openrouter") and bool(or_key)
+
+        # Jika auto + HF sudah pernah 402 di session ini → coba Groq dulu
+        if pref == "auto" and hf_exhausted and try_groq and not answer:
+            groq_model = GROQ_MODEL_MAP.get(model, "llama-3.1-8b-instant")
+            with st.spinner(f"⚡ HF kredit habis (session). Langsung Groq ({groq_model})..."):
+                answer, err_early = _call_provider(API_URL_GROQ, groq_key, groq_model, messages_text)
+                if answer:
+                    used_provider = "groq"
+                    used_model = groq_model
+                    st.info(f"ℹ️ Langsung **Groq** (`{groq_model}`) — HF 402 sudah terdeteksi di session ini.")
+                else:
+                    last_error = err_early
+
+        # 1) Hugging Face (jika belum dapat jawaban)
+        if try_hf and not answer:
+            with st.spinner("🤖 AI sedang memproses (Hugging Face)..."):
+                if not hf_token:
+                    last_error = "HF_TOKEN_MISSING"
+                else:
+                    answer, last_error = _call_provider(
+                        API_URL_HF, hf_token, model, messages_multimodal
+                    )
+                    if answer:
+                        used_provider = "huggingface"
+                        used_model = model
+                        # HF berhasil lagi → reset flag
+                        st.session_state["hf_credits_exhausted"] = False
+
+        # 2) Groq (otomatis saat 402 / preferensi groq)
+        if not answer and try_groq:
+            groq_model = GROQ_MODEL_MAP.get(model, "llama-3.1-8b-instant")
+            label = "🔄 HF kredit habis / gagal. Beralih ke Groq..." if last_error == "402_CREDITS" else f"🤖 Memproses via Groq ({groq_model})..."
+            with st.spinner(label):
+                answer, err2 = _call_provider(API_URL_GROQ, groq_key, groq_model, messages_text)
+                if answer:
+                    used_provider = "groq"
+                    used_model = groq_model
+                    if last_error == "402_CREDITS":
+                        # Tandai session: HF habis → query berikutnya prioritaskan Groq otomatis
+                        st.session_state["hf_credits_exhausted"] = True
+                        st.session_state["preferred_provider"] = "auto"
+                        st.query_params["provider"] = "auto"
+                        st.success(
+                            f"✅ **Smart fallback aktif** — HF 402 terdeteksi. "
+                            f"Prompt yang sama **otomatis dijawab** oleh **Groq** (`{groq_model}`). "
+                            f"Query berikutnya akan mencoba Groq lebih dulu jika HF masih 402."
+                        )
+                    else:
+                        st.info(f"ℹ️ Menggunakan **Groq** (`{groq_model}`).")
+                else:
+                    last_error = err2 or last_error
+
+        # 3) OpenRouter
+        if not answer and try_or:
+            or_model = OPENROUTER_MODEL_MAP.get(model, "meta-llama/llama-3.1-8b-instruct")
+            label = "🔄 Mencoba OpenRouter..." if last_error else f"🤖 Memproses via OpenRouter ({or_model})..."
+            with st.spinner(label):
+                answer, err3 = _call_provider(
+                    API_URL_OPENROUTER,
+                    or_key,
+                    or_model,
+                    messages_text,
+                    extra_headers={
+                        "HTTP-Referer": "https://telco-digital-ai.streamlit.app",
+                        "X-Title": "ID Telco Digital AI",
+                    },
                 )
                 if answer:
-                    used_provider = "huggingface"
-                    used_model = model
+                    used_provider = "openrouter"
+                    used_model = or_model
+                    st.success(f"✅ **Smart fallback aktif** — memakai **OpenRouter** (`{or_model}`).")
+                else:
+                    last_error = err3 or last_error
 
-        # Fallback 1: Groq (gratis, cepat)
-        if not answer and last_error in ("402_CREDITS", "429_RATE_LIMIT", "HF_TOKEN_MISSING", "TIMEOUT") or (
-            not answer and last_error.startswith("HTTP_")
-        ):
-            groq_key = st.secrets.get("GROQ_API_KEY") or st.secrets.get("groq_api_key")
-            if groq_key:
-                groq_model = GROQ_MODEL_MAP.get(model, "llama-3.1-8b-instant")
-                with st.spinner(f"🔄 HF gagal ({last_error}). Mencoba Groq ({groq_model})..."):
-                    answer, err2 = _call_provider(
-                        API_URL_GROQ, groq_key, groq_model, messages_text
-                    )
-                    if answer:
-                        used_provider = "groq"
-                        used_model = groq_model
-                        st.info(f"ℹ️ Menggunakan fallback **Groq** (`{groq_model}`) karena Hugging Face tidak tersedia.")
-                    else:
-                        last_error = err2 or last_error
-
-        # Fallback 2: OpenRouter (free tier models)
+        # --- Semua gagal: smart recovery UI ---
         if not answer:
-            or_key = st.secrets.get("OPENROUTER_API_KEY") or st.secrets.get("openrouter_api_key")
-            if or_key:
-                or_model = OPENROUTER_MODEL_MAP.get(model, "meta-llama/llama-3.1-8b-instruct")
-                with st.spinner(f"🔄 Mencoba OpenRouter ({or_model})..."):
-                    answer, err3 = _call_provider(
-                        API_URL_OPENROUTER,
-                        or_key,
-                        or_model,
-                        messages_text,
-                        extra_headers={
-                            "HTTP-Referer": "https://telco-digital-ai.streamlit.app",
-                            "X-Title": "ID Telco Digital AI",
-                        },
-                    )
-                    if answer:
-                        used_provider = "openrouter"
-                        used_model = or_model
-                        st.info(f"ℹ️ Menggunakan fallback **OpenRouter** (`{or_model}`).")
-                    else:
-                        last_error = err3 or last_error
+            import urllib.parse
+            encoded_prompt = urllib.parse.quote(prompt.strip()[:1500])
 
-        # Jika semua gagal
-        if not answer:
             if last_error == "402_CREDITS":
                 st.error(
                     "❌ **Kredit Hugging Face habis (HTTP 402).**\n\n"
-                    "Kuota Inference Providers bulanan akun HF Anda sudah habis. "
-                    "Silakan: tunggu reset bulanan, top-up di [HF Billing](https://huggingface.co/settings/billing), "
-                    "atau isi `GROQ_API_KEY` / `OPENROUTER_API_KEY` di Streamlit Secrets untuk fallback otomatis."
+                    "Kuota Inference Providers bulanan akun HF sudah habis."
                 )
+                st.markdown("### 🛠️ Smart Recovery — pilih salah satu:")
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    # Deep link paksa Groq
+                    groq_link = (
+                        f"https://telco-digital-ai.streamlit.app/"
+                        f"?provider=groq&model={urllib.parse.quote(model)}&prompt={encoded_prompt}"
+                    )
+                    st.link_button(
+                        "🚀 Buka ulang dengan Groq",
+                        groq_link,
+                        use_container_width=True,
+                        type="primary",
+                    )
+                    st.caption("Membuka tab/app dengan provider=groq (butuh GROQ_API_KEY di Secrets)")
+
+                with col_b:
+                    or_link = (
+                        f"https://telco-digital-ai.streamlit.app/"
+                        f"?provider=openrouter&model={urllib.parse.quote(model)}&prompt={encoded_prompt}"
+                    )
+                    st.link_button(
+                        "🚀 Buka ulang dengan OpenRouter",
+                        or_link,
+                        use_container_width=True,
+                    )
+                    st.caption("Membuka tab/app dengan provider=openrouter (butuh OPENROUTER_API_KEY)")
+
+                st.markdown("---")
+                st.markdown(
+                    "**Atau isi API key di Streamlit Secrets, lalu klik tombol di bawah:**"
+                )
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    if st.button("Coba lagi · Auto fallback", use_container_width=True):
+                        st.session_state["preferred_provider"] = "auto"
+                        st.query_params["provider"] = "auto"
+                        st.rerun()
+                with c2:
+                    if st.button("Paksa Groq sekarang", use_container_width=True, disabled=not bool(groq_key)):
+                        st.session_state["preferred_provider"] = "groq"
+                        st.query_params["provider"] = "groq"
+                        st.rerun()
+                with c3:
+                    if st.button("Paksa OpenRouter sekarang", use_container_width=True, disabled=not bool(or_key)):
+                        st.session_state["preferred_provider"] = "openrouter"
+                        st.query_params["provider"] = "openrouter"
+                        st.rerun()
+
+                if not groq_key and not or_key:
+                    st.warning(
+                        "⚠️ Belum ada `GROQ_API_KEY` atau `OPENROUTER_API_KEY` di Secrets. "
+                        "Tambahkan salah satunya agar fallback otomatis berfungsi tanpa klik ulang."
+                    )
+                    st.code(
+                        'GROQ_API_KEY = "gsk_..."\nOPENROUTER_API_KEY = "sk-or-v1-..."',
+                        language="toml",
+                    )
+
             elif last_error == "429_RATE_LIMIT":
-                st.error("❌ Rate limit tercapai. Coba lagi beberapa saat atau ganti model/provider.")
+                st.error("❌ Rate limit tercapai. Coba lagi beberapa saat atau ganti provider di Pengaturan.")
             elif last_error == "TIMEOUT":
-                st.error("⏱️ Timeout: Model membutuhkan waktu lebih lama. Coba model lebih ringan.")
+                st.error("⏱️ Timeout. Coba model lebih ringan atau provider Groq.")
             elif last_error == "HF_TOKEN_MISSING":
                 st.error("❌ HF_TOKEN belum diatur di Streamlit Secrets.")
             else:
                 st.error(f"❌ Semua provider gagal. Detail: {last_error}")
-            log_access(feature="error", prompt=prompt.strip(), model=model, error_note=last_error)
+
+            log_access(feature="error", prompt=prompt.strip(), model=model, error_note=last_error or "all_failed")
             st.stop()
 
         # Sukses
@@ -1168,6 +1304,7 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
         st.session_state["prompt_history"] = prompt
         st.query_params["prompt"] = prompt
         st.query_params["model"] = model
+        st.query_params["provider"] = used_provider if used_provider in ("hf", "groq", "openrouter") else st.session_state.get("preferred_provider", "auto")
 
         log_access(
             feature="query_success",
