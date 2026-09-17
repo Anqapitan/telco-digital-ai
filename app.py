@@ -6,7 +6,7 @@ import streamlit as st
 # ============================================================
 
 st.set_page_config(
-    page_title="Telco Digital AI",
+    page_title="Telco Digital AI Assistant",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -235,6 +235,9 @@ st.markdown(
 
 st.markdown(
     """
+    <div class="app-caption">
+    <i>Gen-AI Literature Analytics by mailto:ndasq.ai@atomicmail.io</i>
+    </div>
     <div class="app-caption">
     AI assistant untuk analisis Telco, ICT, Digital Transformation,
     Fiber Optic, 5G, Satellite, Data Center, Regulation,
