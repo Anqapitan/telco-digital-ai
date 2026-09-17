@@ -1,31 +1,23 @@
 import requests
 import streamlit as st
 import base64
+from datetime import datetime
+from io import BytesIO
 
 # ============================================================
-# LOGO SVG INLINE (berdasarkan logo yang Anda lampirkan)
+# LOGO SVG INLINE
 # ============================================================
 
 LOGO_SVG = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
-  <!-- Background transparan -->
   <rect width="300" height="300" fill="none"/>
-  
-  <!-- Bentuk putih kiri -->
   <polygon points="42,90 78,70 78,230 42,210" fill="#fbfcfe" stroke="#0b0b0b" stroke-width="8"/>
-  
-  <!-- Bentuk merah tengah atas -->
   <polygon points="112,50 170,26 186,50 186,176" fill="#f2453d" stroke="#0b0b0b" stroke-width="8"/>
-  
-  <!-- Bentuk putih tengah bawah -->
   <polygon points="112,96 186,222 148,272 112,252" fill="#fbfcfe" stroke="#0b0b0b" stroke-width="8"/>
-  
-  <!-- Bentuk merah kanan -->
   <polygon points="222,68 258,88 258,230 222,210" fill="#f2453d" stroke="#0b0b0b" stroke-width="8"/>
 </svg>
 """
 
-# Convert SVG ke base64 untuk favicon & logo
 LOGO_BASE64 = base64.b64encode(LOGO_SVG.encode("utf-8")).decode("utf-8")
 LOGO_DATA_URI = f"data:image/svg+xml;base64,{LOGO_BASE64}"
 
@@ -35,21 +27,18 @@ LOGO_DATA_URI = f"data:image/svg+xml;base64,{LOGO_BASE64}"
 
 st.set_page_config(
     page_title="ID Telco Digital AI Assistant",
-    page_icon=LOGO_DATA_URI,          # ← Favicon dari logo yang ditanamkan
+    page_icon=LOGO_DATA_URI,
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
 # ============================================================
-# CSS RESPONSIVE + LOGO STYLE
+# CSS
 # ============================================================
 
 st.markdown(
     f"""
     <style>
-    /* --------------------------------------------------------
-       GLOBAL
-       -------------------------------------------------------- */
     .main .block-container {{
         padding-top: 1.5rem;
         padding-bottom: 3rem;
@@ -57,10 +46,6 @@ st.markdown(
         padding-right: 5%;
         max-width: 1400px;
     }}
-
-    /* --------------------------------------------------------
-       LOGO HEADER
-       -------------------------------------------------------- */
     .logo-header {{
         display: flex;
         align-items: center;
@@ -72,10 +57,6 @@ st.markdown(
         width: auto;
         filter: drop-shadow(0 3px 8px rgba(0,0,0,0.25));
     }}
-
-    /* --------------------------------------------------------
-       TITLE
-       -------------------------------------------------------- */
     .app-title {{
         font-size: 2.3rem;
         font-weight: 700;
@@ -87,10 +68,6 @@ st.markdown(
         opacity: 0.75;
         margin-bottom: 1.2rem;
     }}
-
-    /* --------------------------------------------------------
-       PROMPT TEXTAREA
-       -------------------------------------------------------- */
     textarea {{
         min-height: 150px !important;
         resize: vertical !important;
@@ -98,13 +75,7 @@ st.markdown(
         overflow-wrap: break-word !important;
         word-wrap: break-word !important;
     }}
-
-    /* --------------------------------------------------------
-       SELECTBOX & BUTTON
-       -------------------------------------------------------- */
-    div[data-baseweb="select"] {{
-        width: 100%;
-    }}
+    div[data-baseweb="select"] {{ width: 100%; }}
     .stButton > button {{
         width: 100%;
         min-height: 48px;
@@ -112,22 +83,28 @@ st.markdown(
         font-weight: 600;
         border-radius: 8px;
     }}
-
-    /* --------------------------------------------------------
-       ANSWER AREA
-       -------------------------------------------------------- */
     .answer-container {{
-        margin-top: 2rem;
+        margin-top: 1rem;
         padding: 1.25rem;
         border-radius: 10px;
         border: 1px solid rgba(128, 128, 128, 0.25);
         overflow-wrap: anywhere;
         word-wrap: break-word;
     }}
-
-    /* --------------------------------------------------------
-       MOBILE
-       -------------------------------------------------------- */
+    .chat-bubble-user {{
+        background: #e8f4fd;
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin: 8px 0;
+        border-left: 4px solid #1f8bd6;
+    }}
+    .chat-bubble-ai {{
+        background: #f0fdf4;
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin: 8px 0;
+        border-left: 4px solid #34b56a;
+    }}
     @media only screen and (max-width: 768px) {{
         .main .block-container {{
             padding-top: 1rem;
@@ -135,32 +112,8 @@ st.markdown(
             padding-left: 1rem;
             padding-right: 1rem;
         }}
-        .app-title {{
-            font-size: 1.7rem;
-        }}
-        .app-caption {{
-            font-size: 0.82rem;
-            line-height: 1.4;
-        }}
-        .logo-header img {{
-            height: 46px;
-        }}
-        textarea {{
-            min-height: 150px !important;
-            font-size: 0.95rem !important;
-        }}
-        .stButton > button {{
-            min-height: 50px;
-        }}
-    }}
-
-    @media only screen and (max-width: 480px) {{
-        .app-title {{
-            font-size: 1.45rem;
-        }}
-        .logo-header img {{
-            height: 40px;
-        }}
+        .app-title {{ font-size: 1.7rem; }}
+        .logo-header img {{ height: 46px; }}
     }}
     </style>
     """,
@@ -168,21 +121,23 @@ st.markdown(
 )
 
 # ============================================================
-# API CONFIGURATION
+# API & MODEL
 # ============================================================
 
 API_URL = "https://router.huggingface.co/v1/chat/completions"
 
-# ============================================================
-# DAFTAR MODEL
-# ============================================================
-
 MODELS = [
     "Qwen/Qwen2.5-72B-Instruct",
     "meta-llama/Llama-3.1-8B-Instruct",
-    "google/gemma-2-9b-it",
-    "google/gemma-3-4b-it",
+    "Qwen/Qwen2.5-VL-72B-Instruct",   # Multimodal (Vision)
+    "google/gemma-3-4b-it",           # Multimodal (Vision)
 ]
+
+# Model yang mendukung vision/multimodal
+MULTIMODAL_MODELS = {
+    "Qwen/Qwen2.5-VL-72B-Instruct",
+    "google/gemma-3-4b-it",
+}
 
 # ============================================================
 # SESSION STATE
@@ -194,21 +149,18 @@ if "prompt_history" not in st.session_state:
 if "model_selected" not in st.session_state:
     st.session_state["model_selected"] = MODELS[0]
 
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []   # list of dict: role, content, model, time, has_image
+
 # ============================================================
 # DEEP LINKING
 # ============================================================
 
 q = st.query_params
-
-if "prompt" in q:
-    deep_link_prompt = q["prompt"]
-    if deep_link_prompt:
-        st.session_state["prompt_history"] = deep_link_prompt
-
-if "model" in q:
-    deep_link_model = q["model"]
-    if deep_link_model in MODELS:
-        st.session_state["model_selected"] = deep_link_model
+if "prompt" in q and q["prompt"]:
+    st.session_state["prompt_history"] = q["prompt"]
+if "model" in q and q["model"] in MODELS:
+    st.session_state["model_selected"] = q["model"]
 
 # ============================================================
 # HEADER + LOGO
@@ -241,7 +193,33 @@ st.markdown(
 )
 
 # ============================================================
-# INPUT PROMPT
+# PILIH MODEL
+# ============================================================
+
+current_model = st.session_state.get("model_selected", MODELS[0])
+try:
+    model_index = MODELS.index(current_model)
+except ValueError:
+    model_index = 0
+
+model = st.selectbox(
+    "Pilih Model AI",
+    MODELS,
+    index=model_index,
+    help="Model multimodal (Vision) akan menampilkan opsi upload gambar."
+)
+st.session_state["model_selected"] = model
+
+is_multimodal = model in MULTIMODAL_MODELS
+
+st.caption(
+    f"Model aktif: **{model}** | "
+    f"{'🖼️ Multimodal (Vision)' if is_multimodal else '📝 Text-only'} | "
+    "Bahasa respons default: **Bahasa Indonesia**"
+)
+
+# ============================================================
+# INPUT PROMPT + UPLOAD GAMBAR (otomatis jika multimodal)
 # ============================================================
 
 prompt = st.text_area(
@@ -259,33 +237,90 @@ prompt = st.text_area(
     key="p"
 )
 
-# ============================================================
-# PILIH MODEL AI
-# ============================================================
-
-current_model = st.session_state.get("model_selected", MODELS[0])
-
-try:
-    model_index = MODELS.index(current_model)
-except ValueError:
-    model_index = 0
-
-model = st.selectbox(
-    "Pilih Model AI",
-    MODELS,
-    index=model_index,
-    help="Model yang dipilih akan selalu diarahkan untuk memberikan jawaban dalam Bahasa Indonesia."
-)
-
-st.session_state["model_selected"] = model
+uploaded_file = None
+if is_multimodal:
+    uploaded_file = st.file_uploader(
+        "📷 Upload Gambar (opsional) — hanya untuk model Vision/Multimodal",
+        type=["png", "jpg", "jpeg", "webp", "gif"],
+        help="Model Vision akan menganalisis gambar yang diunggah bersama pertanyaan Anda."
+    )
+    if uploaded_file is not None:
+        st.image(uploaded_file, caption="Preview gambar yang akan dianalisis", use_container_width=True)
 
 # ============================================================
-# INFO MODEL
+# FUNGSI BANTUAN: Chat History
 # ============================================================
 
-st.caption(
-    f"Model aktif: **{model}** | Bahasa respons default: **Bahasa Indonesia**"
-)
+def format_history_markdown(history):
+    lines = ["# Riwayat Chat - ID Telco Digital AI\n"]
+    for i, msg in enumerate(history, 1):
+        role = "👤 User" if msg["role"] == "user" else "🤖 AI"
+        time_str = msg.get("time", "")
+        model_str = f" ({msg.get('model', '')})" if msg["role"] == "assistant" else ""
+        img_note = " *[ada gambar]*" if msg.get("has_image") else ""
+        lines.append(f"### {i}. {role}{model_str} — {time_str}{img_note}\n")
+        lines.append(msg["content"] + "\n")
+    return "\n".join(lines)
+
+def format_history_whatsapp(history):
+    lines = []
+    for msg in history:
+        time_str = msg.get("time", "")
+        if msg["role"] == "user":
+            prefix = f"[{time_str}] Anda:"
+        else:
+            prefix = f"[{time_str}] AI ({msg.get('model', '')}):"
+        content = msg["content"]
+        if msg.get("has_image"):
+            content = "[Gambar dilampirkan]\n" + content
+        lines.append(f"{prefix}\n{content}\n")
+    return "\n".join(lines)
+
+# ============================================================
+# TAMPILKAN CHAT HISTORY
+# ============================================================
+
+if st.session_state["chat_history"]:
+    st.markdown("### 💬 Riwayat Percakapan (Session ini)")
+    for msg in st.session_state["chat_history"]:
+        if msg["role"] == "user":
+            st.markdown(
+                f'<div class="chat-bubble-user"><b>Anda</b> <small>({msg.get("time","")})</small><br>{msg["content"]}</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                f'<div class="chat-bubble-ai"><b>AI</b> <small>({msg.get("model","")} • {msg.get("time","")})</small><br>{msg["content"]}</div>',
+                unsafe_allow_html=True
+            )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        md_content = format_history_markdown(st.session_state["chat_history"])
+        st.download_button(
+            "📥 Download Markdown",
+            data=md_content,
+            file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+    with col2:
+        wa_content = format_history_whatsapp(st.session_state["chat_history"])
+        st.download_button(
+            "📱 Download format WhatsApp",
+            data=wa_content,
+            file_name=f"chat_whatsapp_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+    with col3:
+        if st.button("📋 Copy ke Clipboard (WhatsApp)", use_container_width=True):
+            st.code(wa_content, language=None)
+            st.success("Teks di atas siap di-copy (Ctrl+A → Ctrl+C)")
+
+    if st.button("🗑️ Hapus Riwayat Chat"):
+        st.session_state["chat_history"] = []
+        st.rerun()
 
 # ============================================================
 # TOMBOL TANYA AI
@@ -321,11 +356,28 @@ ATURAN KUALITAS:
 - Untuk persoalan bisnis/proyek, pertimbangkan Business, Technology, Project, Risk, Governance dan O&M apabila relevan.
 """
 
+    # Siapkan content user
+    user_content = prompt.strip()
+    has_image = False
+
+    if is_multimodal and uploaded_file is not None:
+        # Encode gambar ke base64
+        img_bytes = uploaded_file.read()
+        img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+        mime = uploaded_file.type or "image/jpeg"
+        data_url = f"data:{mime};base64,{img_b64}"
+
+        user_content = [
+            {"type": "text", "text": prompt.strip()},
+            {"type": "image_url", "image_url": {"url": data_url}}
+        ]
+        has_image = True
+
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt.strip()},
-            {"role": "user", "content": prompt.strip()}
+            {"role": "user", "content": user_content}
         ],
         "max_tokens": 8192,
         "temperature": 0.7
@@ -345,12 +397,12 @@ ATURAN KUALITAS:
     }
 
     try:
-        with st.spinner("🤖 AI sedang memproses pertanyaan..."):
+        with st.spinner("🤖 AI sedang memproses pertanyaan..." + (" (dengan gambar)" if has_image else "")):
             response = requests.post(
                 API_URL,
                 json=payload,
                 headers=headers,
-                timeout=120
+                timeout=180
             )
 
         response.raise_for_status()
@@ -366,18 +418,34 @@ ATURAN KUALITAS:
             st.error("❌ Content jawaban AI kosong.")
             st.stop()
 
+        # Simpan ke chat history
+        now = datetime.now().strftime("%H:%M:%S")
+        st.session_state["chat_history"].append({
+            "role": "user",
+            "content": prompt.strip(),
+            "time": now,
+            "has_image": has_image
+        })
+        st.session_state["chat_history"].append({
+            "role": "assistant",
+            "content": answer,
+            "model": model,
+            "time": now,
+            "has_image": False
+        })
+
+        st.session_state["prompt_history"] = prompt
+        st.session_state["model_selected"] = model
+        st.query_params["prompt"] = prompt
+        st.query_params["model"] = model
+
         st.markdown("### ✅ Jawaban AI")
         st.markdown('<div class="answer-container">', unsafe_allow_html=True)
         st.markdown(answer)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        st.session_state["prompt_history"] = prompt
-        st.session_state["model_selected"] = model
-
-        st.query_params["prompt"] = prompt
-        st.query_params["model"] = model
-
         st.caption(f"Model: `{model}` | Response language: `Bahasa Indonesia`")
+        st.rerun()   # refresh agar history muncul di atas
 
     except requests.exceptions.Timeout:
         st.error("⏱️ Request timeout. Model membutuhkan waktu lebih lama untuk merespons.")
