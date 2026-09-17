@@ -215,7 +215,7 @@ if "model" in q:
 # ============================================================
 
 st.markdown(
-    """
+    f"""
     <div class="logo-header">
         <img src="{LOGO_DATA_URI}" alt="Logo Narational">
         <div>
