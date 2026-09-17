@@ -3,6 +3,5 @@ requests
 duckduckgo-search
 beautifulsoup4
 lxml
-gspread
-google-auth
+supabase
 fpdf2
