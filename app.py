@@ -34,7 +34,7 @@ LOGO_DATA_URI = f"data:image/svg+xml;base64,{LOGO_BASE64}"
 # ============================================================
 
 st.set_page_config(
-    page_title="Telco Digital AI Assistant",
+    page_title="ID Telco Digital AI Assistant",
     page_icon=LOGO_DATA_URI,          # ← Favicon dari logo yang ditanamkan
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -219,9 +219,9 @@ st.markdown(
     <div class="logo-header">
         <img src="{LOGO_DATA_URI}" alt="Logo Narational">
         <div>
-            <div class="app-title">Telco Digital AI</div>
+            <div class="app-title">ID Telco Digital AI Assistant</div>
             <div class="app-caption" style="margin-bottom:0">
-                Gen-AI Literature Analytics
+                Gen-AI Literature Analytics by nap@iicf.or.id
             </div>
         </div>
     </div>
@@ -233,7 +233,7 @@ st.markdown(
     """
     <div class="app-caption">
     AI assistant untuk analisis Telco, ICT, Digital Transformation,
-    Fiber Optic, 5G, Satellite, Data Center, Regulation,
+    AI regulation, Fiber Optic, 5G, Satellite, Data Center, Regulation,
     Project & Risk Management.
     </div>
     """,
