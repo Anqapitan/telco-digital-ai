@@ -481,7 +481,7 @@ def append_behavior_log(row: Dict[str, Any]) -> bool:
 
         # Pastikan semua value string / serializable
         clean = {k: ("" if v is None else str(v)) for k, v in row.items()}
-        client.table("access_logs").insert(clean).execute()
+        client.table("telcodigitalai_logs").insert(clean).execute()
         return True
     except Exception as e:
         if st.session_state.get("debug_mode"):
