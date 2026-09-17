@@ -573,7 +573,12 @@ def create_pdf_from_history(history: List[Dict], title: str = "Riwayat Chat - ID
         pdf.ln(5)
 
         for item in history:
-            role = "ANDA" if item["role"] == "user" else "AI"
+            if item.get("role") == "user":
+                ip = item.get("ip", "unknown")
+                country = item.get("country", "unknown")
+                role = f"[{ip}] [{country}]"
+            else:
+                role = "AI"
             header = f"[{item.get('time', '')}] {role} ({item.get('model', '')})"
             pdf.set_font("Helvetica", "B", 11)
             try:
@@ -907,11 +912,33 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
         answer = result["choices"][0]["message"]["content"]
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Ambil IP, region, dan origin URL untuk ditampilkan di riwayat
+        try:
+            _ip, _country = safe_get_ip_and_country()
+        except Exception:
+            _ip, _country = "unknown", "unknown"
+        try:
+            _origin = get_origin_url()
+        except Exception:
+            _origin = "unknown"
+
         st.session_state["chat_history"].append({
-            "role": "user", "content": prompt.strip(), "model": model, "time": now
+            "role": "user",
+            "content": prompt.strip(),
+            "model": model,
+            "time": now,
+            "ip": _ip,
+            "country": _country,
+            "origin_url": _origin,
         })
         st.session_state["chat_history"].append({
-            "role": "assistant", "content": answer, "model": model, "time": now
+            "role": "assistant",
+            "content": answer,
+            "model": model,
+            "time": now,
+            "ip": _ip,
+            "country": _country,
+            "origin_url": _origin,
         })
 
         st.markdown("### ✅ Jawaban AI")
@@ -975,11 +1002,24 @@ if st.session_state["chat_history"]:
     # Tampilkan riwayat dengan komponen native Streamlit (bersih, tanpa tag HTML)
     for item in st.session_state["chat_history"]:
         role = item["role"]
-        role_label = "👤 ANDA" if role == "user" else "🤖 AI"
-        role_plain = "Anda" if role == "user" else "AI"
+        ip = item.get("ip", "unknown")
+        country = item.get("country", "unknown")
+        origin = item.get("origin_url", "unknown")
+
+        if role == "user":
+            # Tampilkan IP · Region · Origin URL (lebih informatif daripada "ANDA")
+            role_label = f"👤 [{ip}] · [{country}]"
+            role_plain = f"[{ip}] [{country}]"
+            extra_info = f"Origin: `{origin}`"
+        else:
+            role_label = "🤖 AI"
+            role_plain = "AI"
+            extra_info = ""
 
         # Header ringkas
         st.markdown(f"**{role_label}**  ·  `{item.get('time', '')}`  ·  `{item.get('model', '')}`")
+        if extra_info:
+            st.caption(extra_info)
 
         # Isi pesan (markdown biasa, aman)
         with st.container(border=True):
@@ -988,8 +1028,14 @@ if st.session_state["chat_history"]:
         st.markdown("")  # spasi antar pesan
 
         # Siapkan file download
-        history_md += f"**{role_label}** ({item['time']}) — `{item['model']}`\n\n{item['content']}\n\n---\n\n"
-        history_plain += f"[{item['time']}] {role_plain} ({item['model']}):\n{item['content']}\n\n"
+        history_md += f"**{role_label}** ({item['time']}) — `{item['model']}`\n"
+        if origin and origin != "unknown":
+            history_md += f"Origin: {origin}\n"
+        history_md += f"\n{item['content']}\n\n---\n\n"
+        history_plain += f"[{item['time']}] {role_plain} ({item['model']}):\n"
+        if origin and origin != "unknown":
+            history_plain += f"Origin: {origin}\n"
+        history_plain += f"{item['content']}\n\n"
         history_wa += f"*{role_plain}* ({item['time']})\n{item['content']}\n\n"
 
     # Tombol export
