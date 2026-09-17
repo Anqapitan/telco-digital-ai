@@ -1103,13 +1103,22 @@ if st.session_state["chat_history"]:
         country = item.get("country", "unknown")
         origin = item.get("origin_url", "") or ""
 
+        session_id = st.session_state.get("session_id", "-")
+
         if role == "user":
-            # Tampilkan IP · Region (lebih informatif daripada "ANDA")
-            # Jika IP internal Streamlit → tampilkan label yang lebih jelas
-            display_ip = ip if ip not in ("unknown", "internal") else "IP tersembunyi"
-            display_country = country if country not in ("unknown",) else "—"
-            role_label = f"👤 [{display_ip}] · [{display_country}]"
-            role_plain = f"[{display_ip}] [{display_country}]"
+            # Streamlit Cloud sering menyembunyikan IP publik user.
+            # Jika IP publik tersedia → tampilkan. Jika tidak → pakai Session ID (lebih berguna).
+            has_public_ip = (
+                ip not in ("unknown", "internal", "", None)
+                and not str(ip).startswith(("10.", "172.16.", "172.17.", "172.18.", "172.19.",
+                                            "172.2", "172.3", "192.168.", "127."))
+            )
+            if has_public_ip:
+                role_label = f"👤 [{ip}] · [{country}]"
+                role_plain = f"[{ip}] [{country}]"
+            else:
+                role_label = f"👤 Session `{session_id}`"
+                role_plain = f"Session {session_id}"
             # Hanya tampilkan Origin jika datang dari situs eksternal
             extra_info = f"🔗 Dari: `{origin}`" if origin else ""
         else:
