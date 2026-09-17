@@ -92,25 +92,50 @@ st.markdown(
         overflow-wrap: anywhere;
         word-wrap: break-word;
     }}
+/* ========== RIWAYAT PERCAKAPAN (PowerShell Style) ========== */
     .history-box {{
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 1rem;
+        background: #012456 !important;          /* Biru tua khas PowerShell */
+        border: 2px solid #00bfff !important;
+        border-radius: 8px;
+        padding: 1.2rem 1.4rem;
         margin-top: 1rem;
-        max-height: 400px;
+        max-height: 480px;
         overflow-y: auto;
-        font-size: 0.9rem;
+        font-family: 'Consolas', 'Courier New', monospace !important;
+        font-size: 0.92rem;
+        line-height: 1.55;
+        color: #ffff00 !important;               /* Kuning terang */
+        box-shadow: 0 0 12px rgba(0, 191, 255, 0.35);
     }}
-    @media only screen and (max-width: 768px) {{
-        .main .block-container {{
-            padding-top: 1rem;
-            padding-bottom: 2rem;
-            padding-left: 1rem;
-            padding-right: 1rem;
-        }}
-        .app-title {{ font-size: 1.7rem; }}
-        .logo-header img {{ height: 46px; }}
+
+    .history-box strong {{
+        color: #00ff9f !important;               /* Hijau neon untuk role */
+    }}
+
+    .history-box code {{
+        background: #003366 !important;
+        color: #7dffb0 !important;
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-size: 0.82rem;
+    }}
+
+    .history-box hr {{
+        border: none;
+        border-top: 1px dashed #00bfff;
+        margin: 1.1rem 0;
+    }}
+
+    /* Scrollbar PowerShell style */
+    .history-box::-webkit-scrollbar {{
+        width: 10px;
+    }}
+    .history-box::-webkit-scrollbar-track {{
+        background: #001a33;
+    }}
+    .history-box::-webkit-scrollbar-thumb {{
+        background: #00bfff;
+        border-radius: 5px;
     }}
     </style>
     """,
@@ -418,13 +443,23 @@ if st.session_state["chat_history"]:
     st.markdown("---")
     st.subheader("📜 Riwayat Percakapan (Session ini)")
 
-    # Tampilkan history
-    history_md = ""
+    history_html = ""
     for item in st.session_state["chat_history"]:
-        role = "👤 **Anda**" if item["role"] == "user" else "🤖 **AI**"
-        history_md += f"{role} ({item['time']}) — `{item['model']}`\n\n{item['content']}\n\n---\n\n"
+        role_label = "👤 ANDA" if item["role"] == "user" else "🤖 AI"
+        role_color = "#00ff9f" if item["role"] == "user" else "#ffcc00"
+        
+        history_html += f"""
+        <div style="margin-bottom: 1.1rem;">
+            <strong style="color:{role_color}">{role_label}</strong> 
+            <span style="color:#7ec8ff; font-size:0.82rem;">({item['time']})</span> 
+            <code>{item['model']}</code>
+            <br><br>
+            <div style="color:#ffff00; white-space: pre-wrap;">{item['content']}</div>
+        </div>
+        <hr>
+        """
 
-    st.markdown(f'<div class="history-box">{history_md}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="history-box">{history_html}</div>', unsafe_allow_html=True)
 
     # Tombol aksi
     col1, col2, col3, col4 = st.columns(4)
