@@ -1,5 +1,33 @@
 import requests
 import streamlit as st
+import base64
+
+# ============================================================
+# LOGO SVG INLINE (berdasarkan logo yang Anda lampirkan)
+# ============================================================
+
+LOGO_SVG = """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
+  <!-- Background transparan -->
+  <rect width="300" height="300" fill="none"/>
+  
+  <!-- Bentuk putih kiri -->
+  <polygon points="42,90 78,70 78,230 42,210" fill="#fbfcfe" stroke="#0b0b0b" stroke-width="8"/>
+  
+  <!-- Bentuk merah tengah atas -->
+  <polygon points="112,50 170,26 186,50 186,176" fill="#f2453d" stroke="#0b0b0b" stroke-width="8"/>
+  
+  <!-- Bentuk putih tengah bawah -->
+  <polygon points="112,96 186,222 148,272 112,252" fill="#fbfcfe" stroke="#0b0b0b" stroke-width="8"/>
+  
+  <!-- Bentuk merah kanan -->
+  <polygon points="222,68 258,88 258,230 222,210" fill="#f2453d" stroke="#0b0b0b" stroke-width="8"/>
+</svg>
+"""
+
+# Convert SVG ke base64 untuk favicon & logo
+LOGO_BASE64 = base64.b64encode(LOGO_SVG.encode("utf-8")).decode("utf-8")
+LOGO_DATA_URI = f"data:image/svg+xml;base64,{LOGO_BASE64}"
 
 # ============================================================
 # KONFIGURASI HALAMAN
@@ -7,157 +35,133 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Telco Digital AI Assistant",
-    page_icon="🤖",
+    page_icon=LOGO_DATA_URI,          # ← Favicon dari logo yang ditanamkan
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
 # ============================================================
-# CSS RESPONSIVE
+# CSS RESPONSIVE + LOGO STYLE
 # ============================================================
 
 st.markdown(
-    """
+    f"""
     <style>
-
     /* --------------------------------------------------------
        GLOBAL
        -------------------------------------------------------- */
-
-    .main .block-container {
-        padding-top: 2rem;
+    .main .block-container {{
+        padding-top: 1.5rem;
         padding-bottom: 3rem;
         padding-left: 5%;
         padding-right: 5%;
         max-width: 1400px;
-    }
+    }}
+
+    /* --------------------------------------------------------
+       LOGO HEADER
+       -------------------------------------------------------- */
+    .logo-header {{
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 0.8rem;
+    }}
+    .logo-header img {{
+        height: 58px;
+        width: auto;
+        filter: drop-shadow(0 3px 8px rgba(0,0,0,0.25));
+    }}
 
     /* --------------------------------------------------------
        TITLE
        -------------------------------------------------------- */
-
-    .app-title {
-        font-size: 2.4rem;
+    .app-title {{
+        font-size: 2.3rem;
         font-weight: 700;
         line-height: 1.2;
-        margin-bottom: 0.2rem;
-    }
-
-    .app-caption {
+        margin-bottom: 0.15rem;
+    }}
+    .app-caption {{
         font-size: 0.95rem;
         opacity: 0.75;
-        margin-bottom: 1.5rem;
-    }
+        margin-bottom: 1.2rem;
+    }}
 
     /* --------------------------------------------------------
        PROMPT TEXTAREA
        -------------------------------------------------------- */
-
-    textarea {
+    textarea {{
         min-height: 150px !important;
         resize: vertical !important;
-
-        /*
-        Memastikan teks membungkus otomatis sesuai
-        lebar layar/browser.
-        */
         white-space: pre-wrap !important;
         overflow-wrap: break-word !important;
         word-wrap: break-word !important;
-    }
+    }}
 
     /* --------------------------------------------------------
-       SELECTBOX
+       SELECTBOX & BUTTON
        -------------------------------------------------------- */
-
-    div[data-baseweb="select"] {
+    div[data-baseweb="select"] {{
         width: 100%;
-    }
-
-    /* --------------------------------------------------------
-       BUTTON
-       -------------------------------------------------------- */
-
-    .stButton > button {
+    }}
+    .stButton > button {{
         width: 100%;
         min-height: 48px;
         font-size: 1rem;
         font-weight: 600;
         border-radius: 8px;
-    }
+    }}
 
     /* --------------------------------------------------------
        ANSWER AREA
        -------------------------------------------------------- */
-
-    .answer-container {
+    .answer-container {{
         margin-top: 2rem;
         padding: 1.25rem;
         border-radius: 10px;
         border: 1px solid rgba(128, 128, 128, 0.25);
         overflow-wrap: anywhere;
         word-wrap: break-word;
-    }
+    }}
 
     /* --------------------------------------------------------
        MOBILE
        -------------------------------------------------------- */
-
-    @media only screen and (max-width: 768px) {
-
-        .main .block-container {
+    @media only screen and (max-width: 768px) {{
+        .main .block-container {{
             padding-top: 1rem;
             padding-bottom: 2rem;
             padding-left: 1rem;
             padding-right: 1rem;
-        }
-
-        .app-title {
-            font-size: 1.75rem;
-        }
-
-        .app-caption {
+        }}
+        .app-title {{
+            font-size: 1.7rem;
+        }}
+        .app-caption {{
             font-size: 0.82rem;
             line-height: 1.4;
-        }
-
-        textarea {
+        }}
+        .logo-header img {{
+            height: 46px;
+        }}
+        textarea {{
             min-height: 150px !important;
             font-size: 0.95rem !important;
-            line-height: 1.5 !important;
-        }
-
-        .stButton > button {
+        }}
+        .stButton > button {{
             min-height: 50px;
-            font-size: 1rem;
-        }
+        }}
+    }}
 
-        .answer-container {
-            padding: 1rem;
-            font-size: 0.95rem;
-        }
-    }
-
-    /* --------------------------------------------------------
-       VERY SMALL MOBILE
-       -------------------------------------------------------- */
-
-    @media only screen and (max-width: 480px) {
-
-        .main .block-container {
-            padding-left: 0.75rem;
-            padding-right: 0.75rem;
-        }
-
-        .app-title {
-            font-size: 1.5rem;
-        }
-
-        textarea {
-            min-height: 145px !important;
-        }
-    }
-
+    @media only screen and (max-width: 480px) {{
+        .app-title {{
+            font-size: 1.45rem;
+        }}
+        .logo-header img {{
+            height: 40px;
+        }}
+    }}
     </style>
     """,
     unsafe_allow_html=True
@@ -192,45 +196,41 @@ if "model_selected" not in st.session_state:
 
 # ============================================================
 # DEEP LINKING
-#
-# Contoh:
-#
-# ?prompt=Apa%20itu%205G
-#
-# ?prompt=Apa%20itu%205G&model=Qwen/Qwen2.5-72B-Instruct
 # ============================================================
 
 q = st.query_params
 
 if "prompt" in q:
-
     deep_link_prompt = q["prompt"]
-
     if deep_link_prompt:
         st.session_state["prompt_history"] = deep_link_prompt
 
-
 if "model" in q:
-
     deep_link_model = q["model"]
-
     if deep_link_model in MODELS:
         st.session_state["model_selected"] = deep_link_model
 
 # ============================================================
-# HEADER
+# HEADER + LOGO
 # ============================================================
 
 st.markdown(
-    '<div class="app-title">🤖 Telco Digital AI</div>',
+    """
+    <div class="logo-header">
+        <img src="{LOGO_DATA_URI}" alt="Logo Narational">
+        <div>
+            <div class="app-title">Telco Digital AI</div>
+            <div class="app-caption" style="margin-bottom:0">
+                Gen-AI Literature Analytics
+            </div>
+        </div>
+    </div>
+    """,
     unsafe_allow_html=True
 )
 
 st.markdown(
     """
-    <div class="app-caption">
-    <i>Gen-AI Literature Analytics by mailto:ndasq.ai@atomicmail.io</i>
-    </div>
     <div class="app-caption">
     AI assistant untuk analisis Telco, ICT, Digital Transformation,
     Fiber Optic, 5G, Satellite, Data Center, Regulation,
@@ -263,28 +263,20 @@ prompt = st.text_area(
 # PILIH MODEL AI
 # ============================================================
 
-current_model = st.session_state.get(
-    "model_selected",
-    MODELS[0]
-)
+current_model = st.session_state.get("model_selected", MODELS[0])
 
 try:
     model_index = MODELS.index(current_model)
 except ValueError:
     model_index = 0
 
-
 model = st.selectbox(
     "Pilih Model AI",
     MODELS,
     index=model_index,
-    help=(
-        "Model yang dipilih akan selalu diarahkan untuk "
-        "memberikan jawaban dalam Bahasa Indonesia."
-    )
+    help="Model yang dipilih akan selalu diarahkan untuk memberikan jawaban dalam Bahasa Indonesia."
 )
 
-# Update session state apabila user mengganti model
 st.session_state["model_selected"] = model
 
 # ============================================================
@@ -292,38 +284,18 @@ st.session_state["model_selected"] = model
 # ============================================================
 
 st.caption(
-    f"Model aktif: **{model}** | "
-    "Bahasa respons default: **Bahasa Indonesia**"
+    f"Model aktif: **{model}** | Bahasa respons default: **Bahasa Indonesia**"
 )
 
 # ============================================================
 # TOMBOL TANYA AI
 # ============================================================
 
-if st.button(
-    "🚀 Tanya AI",
-    type="primary",
-    use_container_width=True
-):
-
-    # --------------------------------------------------------
-    # VALIDASI PROMPT
-    # --------------------------------------------------------
+if st.button("🚀 Tanya AI", type="primary", use_container_width=True):
 
     if not prompt.strip():
-
-        st.warning(
-            "⚠️ Mohon isi pertanyaan terlebih dahulu."
-        )
-
+        st.warning("⚠️ Mohon isi pertanyaan terlebih dahulu.")
         st.stop()
-
-    # --------------------------------------------------------
-    # SYSTEM PROMPT
-    #
-    # Instruksi ini sengaja dibuat eksplisit agar model
-    # apa pun yang dipilih diarahkan menggunakan Bahasa Indonesia.
-    # --------------------------------------------------------
 
     system_prompt = """
 Anda adalah Telco Digital AI, seorang AI assistant profesional
@@ -333,94 +305,47 @@ Data Center, Fiber Optic, Submarine Cable, Satellite,
 5G, IoT, Cloud, Cybersecurity, Regulation dan Digital Infrastructure.
 
 ATURAN BAHASA:
-
 1. Selalu jawab dalam Bahasa Indonesia.
 2. Gunakan Bahasa Indonesia yang profesional, jelas dan natural.
-3. Istilah teknis internasional boleh tetap menggunakan istilah
-   bahasa Inggris apabila istilah tersebut merupakan terminology
-   standar industri.
-4. Jika pengguna bertanya menggunakan bahasa selain Bahasa Indonesia,
-   tetap berikan jawaban utama dalam Bahasa Indonesia.
+3. Istilah teknis internasional boleh tetap menggunakan istilah bahasa Inggris apabila istilah tersebut merupakan terminology standar industri.
+4. Jika pengguna bertanya menggunakan bahasa selain Bahasa Indonesia, tetap berikan jawaban utama dalam Bahasa Indonesia.
 5. Jangan mengubah pertanyaan pengguna ke bahasa lain sebelum menjawab.
-6. Gunakan struktur yang mudah dibaca seperti heading, bullet point,
-   numbered list atau tabel apabila memang membantu.
-7. Jangan mengatakan bahwa Anda tidak dapat menggunakan Bahasa Indonesia
-   hanya karena model dasar Anda menggunakan bahasa lain.
+6. Gunakan struktur yang mudah dibaca seperti heading, bullet point, numbered list atau tabel apabila memang membantu.
+7. Jangan mengatakan bahwa Anda tidak dapat menggunakan Bahasa Indonesia hanya karena model dasar Anda menggunakan bahasa lain.
 
 ATURAN KUALITAS:
-
 - Bedakan antara fakta, asumsi, analisis dan rekomendasi.
 - Jika informasi bersifat tidak pasti, jelaskan tingkat ketidakpastiannya.
 - Jangan mengarang sumber, data, regulasi atau angka.
 - Untuk persoalan teknis, jelaskan konsep secara sistematis.
-- Untuk persoalan bisnis/proyek, pertimbangkan Business,
-  Technology, Project, Risk, Governance dan O&M apabila relevan.
+- Untuk persoalan bisnis/proyek, pertimbangkan Business, Technology, Project, Risk, Governance dan O&M apabila relevan.
 """
 
-    # ========================================================
-    # PAYLOAD API
-    # ========================================================
-
     payload = {
-
         "model": model,
-
         "messages": [
-            {
-                "role": "system",
-                "content": system_prompt.strip()
-            },
-            {
-                "role": "user",
-                "content": prompt.strip()
-            }
+            {"role": "system", "content": system_prompt.strip()},
+            {"role": "user", "content": prompt.strip()}
         ],
-
         "max_tokens": 8192,
-
         "temperature": 0.7
     }
 
-    # ========================================================
-    # HEADER
-    # ========================================================
-
     try:
-
         hf_token = st.secrets["HF_TOKEN"]
-
     except Exception:
-
-        st.error(
-            "❌ HF_TOKEN belum ditemukan."
-        )
-
-        st.info(
-            "Tambahkan HF_TOKEN pada Streamlit Secrets."
-        )
-
+        st.error("❌ HF_TOKEN belum ditemukan.")
+        st.info("Tambahkan HF_TOKEN pada Streamlit Secrets.")
         st.stop()
 
-
     headers = {
-
         "Authorization": f"Bearer {hf_token}",
-
         "Content-Type": "application/json",
-
         "Accept": "application/json"
     }
 
-    # ========================================================
-    # REQUEST KE HUGGING FACE
-    # ========================================================
-
     try:
-
-        with st.spinner(
-            "🤖 AI sedang memproses pertanyaan..."
-        ):
-
+        with st.spinner("🤖 AI sedang memproses pertanyaan..."):
             response = requests.post(
                 API_URL,
                 json=payload,
@@ -428,146 +353,42 @@ ATURAN KUALITAS:
                 timeout=120
             )
 
-        # ----------------------------------------------------
-        # ERROR HTTP
-        # ----------------------------------------------------
-
         response.raise_for_status()
-
-        # ----------------------------------------------------
-        # PARSE RESPONSE
-        # ----------------------------------------------------
-
         result_data = response.json()
 
-
-        if "choices" not in result_data:
-
-            st.error(
-                "❌ Response API tidak memiliki field 'choices'."
-            )
-
-            st.json(result_data)
-
+        if "choices" not in result_data or not result_data["choices"]:
+            st.error("❌ AI tidak memberikan jawaban.")
             st.stop()
 
-
-        if not result_data["choices"]:
-
-            st.error(
-                "❌ AI tidak memberikan jawaban."
-            )
-
-            st.stop()
-
-        answer = (
-            result_data["choices"][0]
-            .get("message", {})
-            .get("content", "")
-        )
-
+        answer = result_data["choices"][0].get("message", {}).get("content", "")
 
         if not answer:
-
-            st.error(
-                "❌ Content jawaban AI kosong."
-            )
-
+            st.error("❌ Content jawaban AI kosong.")
             st.stop()
 
-        # ====================================================
-        # TAMPILKAN JAWABAN
-        # ====================================================
-
-        st.markdown(
-            "### ✅ Jawaban AI"
-        )
-
-        st.markdown(
-            '<div class="answer-container">',
-            unsafe_allow_html=True
-        )
-
+        st.markdown("### ✅ Jawaban AI")
+        st.markdown('<div class="answer-container">', unsafe_allow_html=True)
         st.markdown(answer)
-
-        st.markdown(
-            "</div>",
-            unsafe_allow_html=True
-        )
-
-        # ====================================================
-        # UPDATE SESSION STATE
-        # ====================================================
+        st.markdown("</div>", unsafe_allow_html=True)
 
         st.session_state["prompt_history"] = prompt
-
         st.session_state["model_selected"] = model
 
-        # ====================================================
-        # UPDATE URL / DEEP LINK
-        # ====================================================
-
         st.query_params["prompt"] = prompt
-
         st.query_params["model"] = model
 
-        # ====================================================
-        # INFORMASI MODEL
-        # ====================================================
-
-        st.caption(
-            f"Model: `{model}` | "
-            "Response language: `Bahasa Indonesia`"
-        )
-
-    # ========================================================
-    # ERROR HANDLING
-    # ========================================================
+        st.caption(f"Model: `{model}` | Response language: `Bahasa Indonesia`")
 
     except requests.exceptions.Timeout:
-
-        st.error(
-            "⏱️ Request timeout. "
-            "Model membutuhkan waktu lebih lama untuk merespons."
-        )
-
-
+        st.error("⏱️ Request timeout. Model membutuhkan waktu lebih lama untuk merespons.")
     except requests.exceptions.HTTPError as e:
-
-        st.error(
-            f"❌ HTTP/API Error: {e}"
-        )
-
-        # Tampilkan detail response apabila tersedia
+        st.error(f"❌ HTTP/API Error: {e}")
         try:
-
-            error_detail = response.json()
-
-            st.code(
-                str(error_detail),
-                language="json"
-            )
-
+            st.code(str(response.json()), language="json")
         except Exception:
-
-            st.code(
-                response.text
-            )
-
-
+            st.code(response.text)
     except requests.exceptions.RequestException as e:
-
-        st.error(
-            f"❌ Network/API error: {e}"
-        )
-
+        st.error(f"❌ Network/API error: {e}")
     except Exception as e:
-
-        st.error(
-            f"❌ Terjadi kesalahan: {e}"
-        )
-
-        st.info(
-            "Pastikan HF_TOKEN valid dan model yang dipilih "
-            "tersedia pada Hugging Face Inference Providers."
-        )
+        st.error(f"❌ Terjadi kesalahan: {e}")
+        st.info("Pastikan HF_TOKEN valid dan model yang dipilih tersedia pada Hugging Face Inference Providers.")
