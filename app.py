@@ -443,11 +443,20 @@ if st.session_state["chat_history"]:
     st.markdown("---")
     st.subheader("📜 Riwayat Percakapan (Session ini)")
 
+    # --- Buat versi HTML (untuk tampilan PowerShell) ---
     history_html = ""
+    # --- Buat versi Markdown (untuk download) ---
+    history_md = "# Riwayat Chat - ID Telco Digital AI\n\n"
+    # --- Buat versi Plain Text ---
+    history_plain = ""
+    # --- Buat versi WhatsApp ---
+    history_wa = ""
+
     for item in st.session_state["chat_history"]:
         role_label = "👤 ANDA" if item["role"] == "user" else "🤖 AI"
         role_color = "#00ff9f" if item["role"] == "user" else "#ffcc00"
         
+        # HTML untuk tampilan
         history_html += f"""
         <div style="margin-bottom: 1.1rem;">
             <strong style="color:{role_color}">{role_label}</strong> 
@@ -456,48 +465,47 @@ if st.session_state["chat_history"]:
             <br><br>
             <div style="color:#ffff00; white-space: pre-wrap;">{item['content']}</div>
         </div>
-        <hr>
+        <hr style="border: none; border-top: 1px dashed #00bfff; margin: 1.1rem 0;">
         """
 
+        # Markdown untuk download
+        history_md += f"**{role_label}** ({item['time']}) — `{item['model']}`\n\n{item['content']}\n\n---\n\n"
+
+        # Plain Text
+        role_plain = "Anda" if item["role"] == "user" else "AI"
+        history_plain += f"[{item['time']}] {role_plain} ({item['model']}):\n{item['content']}\n\n"
+
+        # WhatsApp format
+        history_wa += f"*{role_plain}* ({item['time']})\n{item['content']}\n\n"
+
+    # Tampilkan dengan tema PowerShell
     st.markdown(f'<div class="history-box">{history_html}</div>', unsafe_allow_html=True)
 
     # Tombol aksi
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        # Download Markdown
-        md_content = "# Riwayat Chat - ID Telco Digital AI\n\n" + history_md
         st.download_button(
             "⬇️ Download Markdown",
-            data=md_content,
+            data=history_md,
             file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
             mime="text/markdown",
             use_container_width=True
         )
 
     with col2:
-        # Download Plain Text
-        plain = ""
-        for item in st.session_state["chat_history"]:
-            role = "Anda" if item["role"] == "user" else "AI"
-            plain += f"[{item['time']}] {role} ({item['model']}):\n{item['content']}\n\n"
         st.download_button(
             "⬇️ Download Plain Text",
-            data=plain,
+            data=history_plain,
             file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
             mime="text/plain",
             use_container_width=True
         )
 
     with col3:
-        # WhatsApp format
-        wa = ""
-        for item in st.session_state["chat_history"]:
-            role = "Anda" if item["role"] == "user" else "AI"
-            wa += f"*{role}* ({item['time']})\n{item['content']}\n\n"
         st.download_button(
             "⬇️ Download WhatsApp",
-            data=wa,
+            data=history_wa,
             file_name=f"chat_wa_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
             mime="text/plain",
             use_container_width=True
