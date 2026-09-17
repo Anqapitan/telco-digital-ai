@@ -50,7 +50,7 @@ except ImportError:
 API_URL_HF = "https://router.huggingface.co/v1/chat/completions"
 API_URL_GROQ = "https://api.groq.com/openai/v1/chat/completions"
 API_URL_OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
-APP_VERSION = "4.2.0"
+APP_VERSION = "4.2.1"
 MAX_LOG_PROMPT_LEN = 800
 MAX_LOG_ANSWER_LEN = 1500
 
@@ -185,36 +185,40 @@ textarea {{
 # MODELS
 # ============================================================
 
-# Setiap item = 1 pilihan di dropdown (provider + model terpisah)
-# Urutan: free-tier paling leluasa dulu (Groq), lalu OpenRouter, lalu HF
+# Setiap item = 1 pilihan (provider + model)
+# Update Sep 2026: llama-3.1-8b-instant & llama-3.3-70b-versatile shutdown Groq 16 Agu 2026
+# OpenRouter free model WAJIB suffix :free (tanpa itu = HTTP 402)
 PROVIDER_CHOICES = [
-    # --- Groq (gratis, cepat, kuota relatif longgar) ---
-    {"id": "groq:llama-3.1-8b-instant", "provider": "groq", "model": "llama-3.1-8b-instant",
-     "label": "Groq · llama-3.1-8b-instant", "desc": "FREE · Paling cepat & hemat kuota (default)",
+    # --- Groq (model aktif pasca-deprecation) ---
+    {"id": "groq:openai/gpt-oss-20b", "provider": "groq", "model": "openai/gpt-oss-20b",
+     "label": "Groq · gpt-oss-20b", "desc": "Aktif · Pengganti Llama 3.1 8B · cepat (default)",
      "type": "text", "max_files": 0, "accept": []},
-    {"id": "groq:llama-3.3-70b-versatile", "provider": "groq", "model": "llama-3.3-70b-versatile",
-     "label": "Groq · llama-3.3-70b-versatile", "desc": "FREE · Reasoning kuat, masih free tier",
+    {"id": "groq:openai/gpt-oss-120b", "provider": "groq", "model": "openai/gpt-oss-120b",
+     "label": "Groq · gpt-oss-120b", "desc": "Aktif · Lebih kuat · pengganti 70B",
      "type": "text", "max_files": 0, "accept": []},
-    {"id": "groq:gemma2-9b-it", "provider": "groq", "model": "gemma2-9b-it",
-     "label": "Groq · gemma2-9b-it", "desc": "FREE · Ringan, bagus percakapan",
+    {"id": "groq:qwen/qwen3.6-27b", "provider": "groq", "model": "qwen/qwen3.6-27b",
+     "label": "Groq · qwen3.6-27b", "desc": "Aktif · Reasoning & multilingual",
      "type": "text", "max_files": 0, "accept": []},
-    # --- OpenRouter ---
-    {"id": "openrouter:meta-llama/llama-3.1-8b-instruct", "provider": "openrouter",
-     "model": "meta-llama/llama-3.1-8b-instruct",
-     "label": "OpenRouter · llama-3.1-8b-instruct", "desc": "FREE tier · Ringan & stabil",
+    # --- OpenRouter FREE ---
+    {"id": "openrouter:openrouter/free", "provider": "openrouter", "model": "openrouter/free",
+     "label": "OpenRouter · free (auto-router)", "desc": "FREE · Pilih model gratis otomatis",
      "type": "text", "max_files": 0, "accept": []},
-    {"id": "openrouter:qwen/qwen-2.5-72b-instruct", "provider": "openrouter",
-     "model": "qwen/qwen-2.5-72b-instruct",
-     "label": "OpenRouter · qwen-2.5-72b-instruct", "desc": "Bisa free/paid · Reasoning panjang",
+    {"id": "openrouter:meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter",
+     "model": "meta-llama/llama-3.3-70b-instruct:free",
+     "label": "OpenRouter · llama-3.3-70b:free", "desc": "FREE · Stabil & kuat",
      "type": "text", "max_files": 0, "accept": []},
-    {"id": "openrouter:google/gemma-2-9b-it", "provider": "openrouter",
-     "model": "google/gemma-2-9b-it",
-     "label": "OpenRouter · gemma-2-9b-it", "desc": "Sering free · Ringan",
+    {"id": "openrouter:meta-llama/llama-3.2-3b-instruct:free", "provider": "openrouter",
+     "model": "meta-llama/llama-3.2-3b-instruct:free",
+     "label": "OpenRouter · llama-3.2-3b:free", "desc": "FREE · Ringan",
      "type": "text", "max_files": 0, "accept": []},
-    # --- Hugging Face (bisa 402 jika kredit habis) ---
+    {"id": "openrouter:openai/gpt-oss-20b:free", "provider": "openrouter",
+     "model": "openai/gpt-oss-20b:free",
+     "label": "OpenRouter · gpt-oss-20b:free", "desc": "FREE · General purpose",
+     "type": "text", "max_files": 0, "accept": []},
+    # --- Hugging Face ---
     {"id": "hf:meta-llama/Llama-3.1-8B-Instruct", "provider": "hf",
      "model": "meta-llama/Llama-3.1-8B-Instruct",
-     "label": "HF · Llama-3.1-8B-Instruct", "desc": "HF · Ringan (bisa 402 jika kredit habis)",
+     "label": "HF · Llama-3.1-8B-Instruct", "desc": "HF · Bisa 402 jika kredit habis",
      "type": "text", "max_files": 0, "accept": []},
     {"id": "hf:Qwen/Qwen2.5-72B-Instruct", "provider": "hf",
      "model": "Qwen/Qwen2.5-72B-Instruct",
@@ -222,26 +226,18 @@ PROVIDER_CHOICES = [
      "type": "text", "max_files": 0, "accept": []},
     {"id": "hf:Qwen/Qwen2.5-VL-72B-Instruct", "provider": "hf",
      "model": "Qwen/Qwen2.5-VL-72B-Instruct",
-     "label": "HF · Qwen2.5-VL-72B (Vision)", "desc": "HF · Multimodal gambar+dokumen",
-     "type": "multimodal", "max_files": 5, "accept": ["png", "jpg", "jpeg", "webp", "gif", "pdf", "txt", "md"]},
+     "label": "HF · Qwen2.5-VL-72B (Vision)", "desc": "HF · Multimodal",
+     "type": "multimodal", "max_files": 5,
+     "accept": ["png", "jpg", "jpeg", "webp", "gif", "pdf", "txt", "md"]},
     {"id": "hf:google/gemma-3-4b-it", "provider": "hf",
      "model": "google/gemma-3-4b-it",
      "label": "HF · gemma-3-4b-it (Vision)", "desc": "HF · Vision ringan",
      "type": "vision", "max_files": 3, "accept": ["png", "jpg", "jpeg", "webp", "gif"]},
-    {"id": "hf:google/gemma-3-12b-it", "provider": "hf",
-     "model": "google/gemma-3-12b-it",
-     "label": "HF · gemma-3-12b-it (Vision)", "desc": "HF · Vision seimbang",
-     "type": "vision", "max_files": 4, "accept": ["png", "jpg", "jpeg", "webp", "gif"]},
-    {"id": "hf:google/gemma-3-27b-it", "provider": "hf",
-     "model": "google/gemma-3-27b-it",
-     "label": "HF · gemma-3-27b-it (Vision)", "desc": "HF · Vision terbaik Gemma-3",
-     "type": "vision", "max_files": 5, "accept": ["png", "jpg", "jpeg", "webp", "gif"]},
 ]
 
 CHOICE_BY_ID = {c["id"]: c for c in PROVIDER_CHOICES}
-DEFAULT_CHOICE_ID = "groq:llama-3.1-8b-instant"  # free tier paling leluasa
+DEFAULT_CHOICE_ID = "groq:openai/gpt-oss-20b"
 
-# Legacy alias (beberapa bagian kode lama)
 MODELS = [c["id"] for c in PROVIDER_CHOICES]
 
 # ============================================================
