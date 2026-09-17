@@ -261,35 +261,103 @@ Periode fokus dashboard: ~16 Jun – 16 Sep 2026. Selalu sebutkan URL dashboard 
 # UTILS
 # ============================================================
 
+def _is_private_ip(ip: str) -> bool:
+    """Cek apakah IP termasuk private / internal (10.x, 172.16-31.x, 192.168.x, 127.x)."""
+    if not ip or ip == "unknown":
+        return True
+    try:
+        parts = [int(p) for p in ip.split(".")]
+        if len(parts) != 4:
+            return True
+        a, b = parts[0], parts[1]
+        if a == 10:
+            return True
+        if a == 172 and 16 <= b <= 31:
+            return True
+        if a == 192 and b == 168:
+            return True
+        if a == 127:
+            return True
+        if a == 0 or a >= 224:
+            return True
+        return False
+    except Exception:
+        return True
+
+
 def safe_get_ip_and_country() -> Tuple[str, str]:
+    """
+    Ambil IP publik client + negara.
+    Di Streamlit Cloud sering muncul IP internal (10.x). Kita filter dan fallback ke lookup eksternal.
+    """
     ip = "unknown"
     country = "unknown"
+
     try:
-        headers = st.context.headers if hasattr(st, "context") and st.context else {}
-        for key in ["X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP", "True-Client-IP"]:
-            val = headers.get(key) or headers.get(key.lower())
-            if val:
-                ip = str(val).split(",")[0].strip()
+        headers = {}
+        if hasattr(st, "context") and st.context:
+            headers = dict(st.context.headers or {})
+
+        # Kumpulkan semua kandidat IP dari berbagai header
+        candidates = []
+        header_keys = [
+            "X-Forwarded-For", "x-forwarded-for",
+            "X-Real-IP", "x-real-ip",
+            "CF-Connecting-IP", "cf-connecting-ip",
+            "True-Client-IP", "true-client-ip",
+            "X-Client-IP", "x-client-ip",
+            "Forwarded", "forwarded",
+        ]
+        for key in header_keys:
+            val = headers.get(key)
+            if not val:
+                continue
+            # X-Forwarded-For bisa berisi rantai: client, proxy1, proxy2
+            for part in str(val).replace("for=", "").split(","):
+                part = part.strip().strip('"').split(";")[0].strip()
+                if part and part not in candidates:
+                    candidates.append(part)
+
+        # Pilih IP publik pertama
+        for cand in candidates:
+            if not _is_private_ip(cand):
+                ip = cand
                 break
-        if ip == "unknown":
+
+        # Jika masih private / unknown → coba lookup dari sisi server (ipapi melihat IP yang connect)
+        # Catatan: di Streamlit Cloud ini sering mengembalikan IP egress Streamlit, bukan user.
+        # Tetap dicoba sebagai fallback.
+        if ip == "unknown" or _is_private_ip(ip):
             try:
-                r = requests.get("https://ipapi.co/json/", timeout=3)
+                r = requests.get("https://ipapi.co/json/", timeout=4)
                 if r.status_code == 200:
                     data = r.json()
-                    ip = data.get("ip", ip)
+                    pub = data.get("ip", "")
+                    if pub and not _is_private_ip(pub):
+                        ip = pub
+                        country = data.get("country_name") or data.get("country_code") or country
+            except Exception:
+                pass
+
+        # Lookup negara untuk IP yang sudah publik
+        if ip != "unknown" and not _is_private_ip(ip) and country == "unknown":
+            try:
+                r = requests.get(f"https://ipapi.co/{ip}/json/", timeout=4)
+                if r.status_code == 200:
+                    data = r.json()
                     country = data.get("country_name") or data.get("country_code") or country
             except Exception:
                 pass
-        else:
-            try:
-                r = requests.get(f"https://ipapi.co/{ip}/json/", timeout=3)
-                if r.status_code == 200:
-                    data = r.json()
-                    country = data.get("country_name") or data.get("country_code") or country
-            except Exception:
-                pass
+
+        # Jika tetap private → tandai sebagai internal Streamlit
+        if _is_private_ip(ip):
+            ip = "internal"
+            if country == "unknown":
+                country = "Streamlit Cloud"
+
     except Exception:
         pass
+
     return ip, country
 
 
@@ -1037,8 +1105,11 @@ if st.session_state["chat_history"]:
 
         if role == "user":
             # Tampilkan IP · Region (lebih informatif daripada "ANDA")
-            role_label = f"👤 [{ip}] · [{country}]"
-            role_plain = f"[{ip}] [{country}]"
+            # Jika IP internal Streamlit → tampilkan label yang lebih jelas
+            display_ip = ip if ip not in ("unknown", "internal") else "IP tersembunyi"
+            display_country = country if country not in ("unknown",) else "—"
+            role_label = f"👤 [{display_ip}] · [{display_country}]"
+            role_plain = f"[{display_ip}] [{display_country}]"
             # Hanya tampilkan Origin jika datang dari situs eksternal
             extra_info = f"🔗 Dari: `{origin}`" if origin else ""
         else:
