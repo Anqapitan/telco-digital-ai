@@ -47,10 +47,30 @@ except ImportError:
 # API & CONSTANTS
 # ============================================================
 
-API_URL = "https://router.huggingface.co/v1/chat/completions"
-APP_VERSION = "4.0.0"
+API_URL_HF = "https://router.huggingface.co/v1/chat/completions"
+API_URL_GROQ = "https://api.groq.com/openai/v1/chat/completions"
+API_URL_OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
+APP_VERSION = "4.1.0"
 MAX_LOG_PROMPT_LEN = 800
 MAX_LOG_ANSWER_LEN = 1500
+
+# Mapping model HF → model fallback di Groq / OpenRouter (nama yang mirip / setara)
+GROQ_MODEL_MAP = {
+    "Qwen/Qwen2.5-VL-72B-Instruct": "llama-3.3-70b-versatile",
+    "Qwen/Qwen2.5-72B-Instruct": "llama-3.3-70b-versatile",
+    "meta-llama/Llama-3.1-8B-Instruct": "llama-3.1-8b-instant",
+    "google/gemma-3-4b-it": "gemma2-9b-it",
+    "google/gemma-3-12b-it": "gemma2-9b-it",
+    "google/gemma-3-27b-it": "llama-3.3-70b-versatile",
+}
+OPENROUTER_MODEL_MAP = {
+    "Qwen/Qwen2.5-VL-72B-Instruct": "qwen/qwen-2.5-72b-instruct",
+    "Qwen/Qwen2.5-72B-Instruct": "qwen/qwen-2.5-72b-instruct",
+    "meta-llama/Llama-3.1-8B-Instruct": "meta-llama/llama-3.1-8b-instruct",
+    "google/gemma-3-4b-it": "google/gemma-2-9b-it",
+    "google/gemma-3-12b-it": "google/gemma-2-9b-it",
+    "google/gemma-3-27b-it": "google/gemma-2-27b-it",
+}
 
 # ============================================================
 # LOGO SVG INLINE
@@ -975,54 +995,145 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
             except Exception as fe:
                 st.warning(f"Gagal memproses file {getattr(f, 'name', '?')}: {fe}")
 
-    messages = [
+    # Messages untuk provider yang support multimodal (HF)
+    messages_multimodal = [
         {"role": "system", "content": system_prompt.strip()},
         {"role": "user", "content": user_content if len(user_content) > 1 else final_prompt}
     ]
+    # Messages text-only (Groq / OpenRouter fallback — tidak kirim image)
+    messages_text = [
+        {"role": "system", "content": system_prompt.strip()},
+        {"role": "user", "content": final_prompt}
+    ]
 
-    payload = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": 8192,
-        "temperature": 0.7
-    }
-
-    try:
-        hf_token = st.secrets["HF_TOKEN"]
-    except Exception:
-        st.error("❌ HF_TOKEN belum diatur di Streamlit Secrets. Hubungi admin.")
-        log_access(feature="error", prompt=prompt.strip(), model=model, error_note="HF_TOKEN missing")
-        st.stop()
-
-    headers = {
-        "Authorization": f"Bearer {hf_token}",
-        "Content-Type": "application/json"
-    }
+    def _call_provider(url: str, api_key: str, model_name: str, msgs: list, extra_headers: dict = None) -> Tuple[str, str]:
+        """Panggil satu provider. Return (answer, error_note). error_note kosong = sukses."""
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        if extra_headers:
+            headers.update(extra_headers)
+        payload = {
+            "model": model_name,
+            "messages": msgs,
+            "max_tokens": 8192,
+            "temperature": 0.7,
+        }
+        try:
+            r = requests.post(url, json=payload, headers=headers, timeout=180)
+            if r.status_code == 402:
+                return "", "402_CREDITS"
+            if r.status_code == 429:
+                return "", "429_RATE_LIMIT"
+            r.raise_for_status()
+            data = r.json()
+            content = data["choices"][0]["message"]["content"]
+            return content, ""
+        except requests.exceptions.Timeout:
+            return "", "TIMEOUT"
+        except requests.exceptions.HTTPError as he:
+            code = getattr(he.response, "status_code", "?")
+            return "", f"HTTP_{code}"
+        except Exception as e:
+            return "", str(e)[:200]
 
     answer = ""
+    used_provider = "huggingface"
+    used_model = model
+    last_error = ""
+
     try:
-        with st.spinner("🤖 AI sedang memproses..."):
-            response = requests.post(API_URL, json=payload, headers=headers, timeout=180)
+        with st.spinner("🤖 AI sedang memproses (Hugging Face)..."):
+            hf_token = st.secrets.get("HF_TOKEN") or st.secrets.get("hf_token")
+            if not hf_token:
+                last_error = "HF_TOKEN_MISSING"
+            else:
+                answer, last_error = _call_provider(
+                    API_URL_HF, hf_token, model, messages_multimodal
+                )
+                if answer:
+                    used_provider = "huggingface"
+                    used_model = model
 
-        response.raise_for_status()
-        result = response.json()
-        answer = result["choices"][0]["message"]["content"]
+        # Fallback 1: Groq (gratis, cepat)
+        if not answer and last_error in ("402_CREDITS", "429_RATE_LIMIT", "HF_TOKEN_MISSING", "TIMEOUT") or (
+            not answer and last_error.startswith("HTTP_")
+        ):
+            groq_key = st.secrets.get("GROQ_API_KEY") or st.secrets.get("groq_api_key")
+            if groq_key:
+                groq_model = GROQ_MODEL_MAP.get(model, "llama-3.1-8b-instant")
+                with st.spinner(f"🔄 HF gagal ({last_error}). Mencoba Groq ({groq_model})..."):
+                    answer, err2 = _call_provider(
+                        API_URL_GROQ, groq_key, groq_model, messages_text
+                    )
+                    if answer:
+                        used_provider = "groq"
+                        used_model = groq_model
+                        st.info(f"ℹ️ Menggunakan fallback **Groq** (`{groq_model}`) karena Hugging Face tidak tersedia.")
+                    else:
+                        last_error = err2 or last_error
 
+        # Fallback 2: OpenRouter (free tier models)
+        if not answer:
+            or_key = st.secrets.get("OPENROUTER_API_KEY") or st.secrets.get("openrouter_api_key")
+            if or_key:
+                or_model = OPENROUTER_MODEL_MAP.get(model, "meta-llama/llama-3.1-8b-instruct")
+                with st.spinner(f"🔄 Mencoba OpenRouter ({or_model})..."):
+                    answer, err3 = _call_provider(
+                        API_URL_OPENROUTER,
+                        or_key,
+                        or_model,
+                        messages_text,
+                        extra_headers={
+                            "HTTP-Referer": "https://telco-digital-ai.streamlit.app",
+                            "X-Title": "ID Telco Digital AI",
+                        },
+                    )
+                    if answer:
+                        used_provider = "openrouter"
+                        used_model = or_model
+                        st.info(f"ℹ️ Menggunakan fallback **OpenRouter** (`{or_model}`).")
+                    else:
+                        last_error = err3 or last_error
+
+        # Jika semua gagal
+        if not answer:
+            if last_error == "402_CREDITS":
+                st.error(
+                    "❌ **Kredit Hugging Face habis (HTTP 402).**\n\n"
+                    "Kuota Inference Providers bulanan akun HF Anda sudah habis. "
+                    "Silakan: tunggu reset bulanan, top-up di [HF Billing](https://huggingface.co/settings/billing), "
+                    "atau isi `GROQ_API_KEY` / `OPENROUTER_API_KEY` di Streamlit Secrets untuk fallback otomatis."
+                )
+            elif last_error == "429_RATE_LIMIT":
+                st.error("❌ Rate limit tercapai. Coba lagi beberapa saat atau ganti model/provider.")
+            elif last_error == "TIMEOUT":
+                st.error("⏱️ Timeout: Model membutuhkan waktu lebih lama. Coba model lebih ringan.")
+            elif last_error == "HF_TOKEN_MISSING":
+                st.error("❌ HF_TOKEN belum diatur di Streamlit Secrets.")
+            else:
+                st.error(f"❌ Semua provider gagal. Detail: {last_error}")
+            log_access(feature="error", prompt=prompt.strip(), model=model, error_note=last_error)
+            st.stop()
+
+        # Sukses
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # Ambil IP, region, dan origin URL untuk ditampilkan di riwayat
         try:
             _ip, _country = safe_get_ip_and_country()
         except Exception:
             _ip, _country = "unknown", "unknown"
         try:
-            _origin = get_external_referrer()  # hanya situs eksternal, kosong jika buka langsung
+            _origin = get_external_referrer()
         except Exception:
             _origin = ""
+
+        display_model = f"{used_model}" + (f" via {used_provider}" if used_provider != "huggingface" else "")
 
         st.session_state["chat_history"].append({
             "role": "user",
             "content": prompt.strip(),
-            "model": model,
+            "model": display_model,
             "time": now,
             "ip": _ip,
             "country": _country,
@@ -1031,7 +1142,7 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
         st.session_state["chat_history"].append({
             "role": "assistant",
             "content": answer,
-            "model": model,
+            "model": display_model,
             "time": now,
             "ip": _ip,
             "country": _country,
@@ -1039,6 +1150,8 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
         })
 
         st.markdown("### ✅ Jawaban AI")
+        if used_provider != "huggingface":
+            st.caption(f"Provider: **{used_provider}** · Model: `{used_model}`")
         st.markdown('<div class="answer-container">', unsafe_allow_html=True)
         st.markdown(answer)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -1060,23 +1173,12 @@ Jawab berdasarkan informasi di atas + pengetahuan Anda.
             feature="query_success",
             prompt=prompt.strip(),
             answer=answer,
-            model=model,
+            model=display_model,
             files_count=len(uploaded_files) if uploaded_files else 0,
             web_search=web_used,
             specialized=specialized_used
         )
 
-    except requests.exceptions.Timeout:
-        msg = "⏱️ Timeout: Model membutuhkan waktu lebih lama. Coba model lebih ringan atau kurangi panjang prompt."
-        st.error(msg)
-        log_access(feature="error", prompt=prompt.strip(), model=model, error_note="Timeout")
-    except requests.exceptions.HTTPError as he:
-        status = getattr(he.response, "status_code", "?")
-        msg = f"❌ HTTP Error {status}. Model mungkin sedang overload atau token habis. Coba model lain."
-        st.error(msg)
-        if st.session_state.get("debug_mode"):
-            st.code(traceback.format_exc())
-        log_access(feature="error", prompt=prompt.strip(), model=model, error_note=f"HTTP {status}")
     except Exception as e:
         st.error(f"❌ Terjadi kesalahan: {str(e)}")
         if st.session_state.get("debug_mode"):
