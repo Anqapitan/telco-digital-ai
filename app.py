@@ -1,503 +1,431 @@
 """
-ID Telco Digital AI Assistant - v5.1.0 (Production-Ready)
-==========================================================
-Refactor menyeluruh dari v5.0.0-rc1. Memperbaiki:
-- 3 bug blocking (pandas import, accept_multiple, context guard flow)
-- Regresi dari v4.3/v4.4 (KEY FACTS hardcoded, multi-bahasa, PDF extraction, model availability)
-- Keamanan (admin password dari secrets, Mermaid strict, HTML escape)
-- Arsitektur context guard (state machine yang benar, tidak butuh klik 2x)
-
-Ringkasan fitur:
-1. Context Guard dengan RAG filter → konfirmasi user → eksekusi sekali klik
-2. KEY FACTS hardcoded + auto-fetch RSS (fallback bertingkat)
-3. Multi-bahasa (ID/EN/MS/Auto)
-4. Ekstraksi PDF (pypdf) + auto-summary untuk dokumen panjang
-5. Feedback RLHF dengan korelasi query
-6. Admin analytics internal (PIN dari secrets)
-7. Rate limiting per session
-8. Deteksi ketersediaan model (cached 10 menit)
-9. Simple RAG (TF-IDF fallback keyword-overlap)
-10. Cascade 13 model dengan timeout per model
+ID Telco Digital AI Assistant - v5.2.0 (Adaptive Theme + Mermaid Fix + Navigation)
+===================================================================================
+Perbaikan v5.2.0:
+- ADAPTIVE THEME: kotak sumber & warning & mermaid mengikuti light/dark theme
+- MERMAID FIX: auto-quote node labels + tunggu CDN ready + error estetis
+- NAVIGASI: sidebar radio untuk Chat / Search & RAG / Logs & Analytics / Diagnostics
+- Semua bug v5.1.0 diperbaiki.
 """
 from __future__ import annotations
 
-# ─────────────────────────────────────────────────────────────
-# STDLIB
-# ─────────────────────────────────────────────────────────────
-import base64
-import hashlib
-import html
-import io
-import json
-import re
-import time
-import traceback
-import uuid
+import base64, hashlib, html, io, json, re, time, traceback, uuid
 import xml.etree.ElementTree as ET
 from collections import Counter, deque
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-# ─────────────────────────────────────────────────────────────
-# THIRD-PARTY (wajib)
-# ─────────────────────────────────────────────────────────────
 import requests
 import streamlit as st
 
-# ─────────────────────────────────────────────────────────────
-# OPTIONAL DEPENDENCIES — status tracking eksplisit
-# ─────────────────────────────────────────────────────────────
+# ── OPTIONAL DEPS ────────────────────────────────────────────
 DDG_AVAILABLE, DDG_ERROR = False, ""
 try:
-    from duckduckgo_search import DDGS
-    DDG_AVAILABLE = True
-except Exception as e:  # noqa: BLE001
-    DDG_ERROR = str(e)[:120]
+    from duckduckgo_search import DDGS; DDG_AVAILABLE = True
+except Exception as e: DDG_ERROR = str(e)[:120]
 
 BS4_AVAILABLE, BS4_ERROR = False, ""
 try:
-    from bs4 import BeautifulSoup
-    BS4_AVAILABLE = True
-except Exception as e:  # noqa: BLE001
-    BS4_ERROR = str(e)[:120]
+    from bs4 import BeautifulSoup; BS4_AVAILABLE = True
+except Exception as e: BS4_ERROR = str(e)[:120]
 
 SUPABASE_AVAILABLE, SUPABASE_ERROR = False, ""
 try:
-    from supabase import Client, create_client  # type: ignore
-    SUPABASE_AVAILABLE = True
-except Exception as e:  # noqa: BLE001
-    SUPABASE_ERROR = str(e)[:120]
+    from supabase import Client, create_client; SUPABASE_AVAILABLE = True
+except Exception as e: SUPABASE_ERROR = str(e)[:120]
 
 FPDF_AVAILABLE, FPDF_ERROR = False, ""
 try:
-    from fpdf import FPDF  # type: ignore
-    FPDF_AVAILABLE = True
-except Exception as e:  # noqa: BLE001
-    FPDF_ERROR = str(e)[:120]
+    from fpdf import FPDF; FPDF_AVAILABLE = True
+except Exception as e: FPDF_ERROR = str(e)[:120]
 
 PYPDF_AVAILABLE, PYPDF_ERROR = False, ""
 try:
-    from pypdf import PdfReader  # type: ignore
-    PYPDF_AVAILABLE = True
-except Exception as e:  # noqa: BLE001
-    PYPDF_ERROR = str(e)[:120]
+    from pypdf import PdfReader; PYPDF_AVAILABLE = True
+except Exception as e: PYPDF_ERROR = str(e)[:120]
 
 PANDAS_AVAILABLE, PANDAS_ERROR = False, ""
 try:
-    import pandas as pd  # type: ignore
-    PANDAS_AVAILABLE = True
-except Exception as e:  # noqa: BLE001
-    PANDAS_ERROR = str(e)[:120]
+    import pandas as pd; PANDAS_AVAILABLE = True
+except Exception as e: PANDAS_ERROR = str(e)[:120]
 
 SKLEARN_AVAILABLE, SKLEARN_ERROR = False, ""
 try:
-    from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
-    from sklearn.metrics.pairwise import cosine_similarity  # type: ignore
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
     SKLEARN_AVAILABLE = True
-except Exception as e:  # noqa: BLE001
-    SKLEARN_ERROR = str(e)[:120]
+except Exception as e: SKLEARN_ERROR = str(e)[:120]
 
-
-# ═════════════════════════════════════════════════════════════
-# KONSTANTA
-# ═════════════════════════════════════════════════════════════
-APP_VERSION = "5.1.0"
-
+# ── KONSTANTA ────────────────────────────────────────────────
+APP_VERSION = "5.2.0"
 API_URL_GROQ = "https://api.groq.com/openai/v1/chat/completions"
 API_URL_OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
 API_URL_HF = "https://router.huggingface.co/v1/chat/completions"
-
 DEFAULT_SUPABASE_TABLE = "telcodigitalai_logs"
-MAX_LOG_PROMPT_LEN = 800
-MAX_LOG_ANSWER_LEN = 1500
-
-# Context guard
-MAX_CONTEXT_CHARS = 14000       # ≈ 4000 token
+MAX_LOG_PROMPT_LEN, MAX_LOG_ANSWER_LEN = 800, 1500
+MAX_CONTEXT_CHARS = 14000
 RAG_TOP_K = 8
-RAG_CHUNK_CHARS = 900
-SUMMARY_TARGET_CHARS = 6000
+RATE_LIMIT_WINDOW_SEC, RATE_LIMIT_MAX_QUERIES = 600, 25
+LLM_TIMEOUT_PER_MODEL, LLM_MAX_ATTEMPTS = 60, 6
 
-# Rate limit per session
-RATE_LIMIT_WINDOW_SEC = 600     # 10 menit
-RATE_LIMIT_MAX_QUERIES = 25
+# ── LOGO ─────────────────────────────────────────────────────
+LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
+<rect width="300" height="300" fill="none"/>
+<polygon points="42,90 78,70 78,230 42,210" fill="#fbfcfe" stroke="#0b0b0b" stroke-width="8"/>
+<polygon points="112,50 170,26 186,50 186,176" fill="#f2453d" stroke="#0b0b0b" stroke-width="8"/>
+<polygon points="112,96 186,222 148,272 112,252" fill="#fbfcfe" stroke="#0b0b0b" stroke-width="8"/>
+<polygon points="222,68 258,88 258,230 222,210" fill="#f2453d" stroke="#0b0b0b" stroke-width="8"/>
+</svg>"""
+LOGO_DATA_URI = f"data:image/svg+xml;base64,{base64.b64encode(LOGO_SVG.encode()).decode()}"
 
-# LLM cascade
-LLM_TIMEOUT_PER_MODEL = 60      # detik
-LLM_MAX_ATTEMPTS = 6            # batasi chain agar tidak 13×60s
+# ── PAGE CONFIG ──────────────────────────────────────────────
+st.set_page_config(page_title="ID Telco Digital AI Assistant",
+                   page_icon=LOGO_DATA_URI, layout="wide",
+                   initial_sidebar_state="expanded")
 
-# ─────────────────────────────────────────────────────────────
-# LOGO SVG INLINE
-# ─────────────────────────────────────────────────────────────
-LOGO_SVG = """
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
- <rect width="300" height="300" fill="none"/>
- <polygon points="42,90 78,70 78,230 42,210" fill="#fbfcfe" stroke="#0b0b0b" stroke-width="8"/>
- <polygon points="112,50 170,26 186,50 186,176" fill="#f2453d" stroke="#0b0b0b" stroke-width="8"/>
- <polygon points="112,96 186,222 148,272 112,252" fill="#fbfcfe" stroke="#0b0b0b" stroke-width="8"/>
- <polygon points="222,68 258,88 258,230 222,210" fill="#f2453d" stroke="#0b0b0b" stroke-width="8"/>
-</svg>
-"""
-LOGO_BASE64 = base64.b64encode(LOGO_SVG.encode("utf-8")).decode("utf-8")
-LOGO_DATA_URI = f"data:image/svg+xml;base64,{LOGO_BASE64}"
+# ═════════════════════════════════════════════════════════════
+# THEME DETECTION
+# ═════════════════════════════════════════════════════════════
+def _detect_theme() -> str:
+    """Return 'light' atau 'dark'. Multi-strategi."""
+    try:
+        if hasattr(st, "context") and hasattr(st.context, "theme"):
+            t = st.context.theme
+            if hasattr(t, "type"):
+                return t.type
+            if isinstance(t, dict):
+                return t.get("base", "light")
+    except Exception: pass
+    try:
+        b = st.get_option("theme.base")
+        if b in ("light", "dark"):
+            return b
+    except Exception: pass
+    return "light"
 
-# ─────────────────────────────────────────────────────────────
-# PAGE CONFIG
-# ─────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="ID Telco Digital AI Assistant",
-    page_icon=LOGO_DATA_URI,
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+IS_DARK = (_detect_theme() == "dark")
 
-# ─────────────────────────────────────────────────────────────
-# CSS
-# ─────────────────────────────────────────────────────────────
-st.markdown(
-    """
+# ── ADAPTIVE COLOR PALETTE ───────────────────────────────────
+if IS_DARK:
+    C = {
+        "bg":            "#0e1117",
+        "surface":       "#1c1f26",
+        "surface_alt":   "rgba(255,255,255,0.04)",
+        "border":        "rgba(255,255,255,0.15)",
+        "text":          "#fafafa",
+        "text_muted":    "#b0b3b8",
+        "accent":        "#4a9eff",
+        "accent_bg":     "rgba(74,158,255,0.12)",
+        "warn":          "#ffb74d",
+        "warn_bg":       "rgba(255,183,77,0.14)",
+        "warn_border":   "#ffb74d",
+        "error":         "#ef5350",
+        "error_bg":      "rgba(239,83,80,0.12)",
+        "code_bg":       "rgba(255,255,255,0.05)",
+        "mermaid_theme": "dark",
+    }
+else:
+    C = {
+        "bg":            "#ffffff",
+        "surface":       "#ffffff",
+        "surface_alt":   "rgba(0,0,0,0.02)",
+        "border":        "rgba(0,0,0,0.12)",
+        "text":          "#1a1a1a",
+        "text_muted":    "#5a5a5a",
+        "accent":        "#1e88e5",
+        "accent_bg":     "#f0f7ff",
+        "warn":          "#b26a00",
+        "warn_bg":       "#fff8e1",
+        "warn_border":   "#ffb300",
+        "error":         "#c62828",
+        "error_bg":      "#ffebee",
+        "code_bg":       "#f5f5f5",
+        "mermaid_theme": "default",
+    }
+
+# ── CSS ADAPTIVE ─────────────────────────────────────────────
+st.markdown(f"""
 <style>
-.main .block-container {
+.main .block-container {{
     padding-top: 1.5rem; padding-bottom: 3rem;
     padding-left: 5%; padding-right: 5%; max-width: 1400px;
-}
-.logo-header { display:flex; align-items:center; gap:16px; margin-bottom:0.8rem; }
-.logo-header img { height:58px; width:auto; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.25)); }
-.app-title { font-size:2.3rem; font-weight:700; line-height:1.2; margin-bottom:0.15rem; }
-.app-caption { font-size:0.95rem; opacity:0.75; margin-bottom:1.2rem; }
-.stButton > button { width:100%; min-height:44px; font-weight:600; border-radius:8px; }
-.answer-container {
+}}
+.logo-header {{ display:flex; align-items:center; gap:16px; margin-bottom:0.8rem; }}
+.logo-header img {{ height:58px; width:auto; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.25)); }}
+.app-title {{ font-size:2.3rem; font-weight:700; line-height:1.2; margin-bottom:0.15rem;
+              color:{C['text']}; }}
+.app-caption {{ font-size:0.95rem; opacity:0.75; margin-bottom:1.2rem; color:{C['text_muted']}; }}
+.stButton > button {{ width:100%; min-height:44px; font-weight:600; border-radius:8px; }}
+
+/* ANSWER CONTAINER — adaptif */
+.answer-container {{
     margin-top:1.5rem; padding:1.25rem; border-radius:10px;
-    border:1px solid rgba(128,128,128,0.25);
-}
-.source-summary {
-    background:#f0f7ff; border-left:4px solid #1e88e5;
-    padding:0.75rem 1rem; margin:1rem 0; border-radius:0 6px 6px 0; font-size:0.92rem;
-}
-.context-warning {
-    background:#fff8e1; border-left:4px solid #ffb300;
-    padding:0.9rem 1.1rem; margin:1rem 0; border-radius:0 6px 6px 0; font-size:0.92rem;
-}
-.history-box {
-    background:#012456 !important; border:2px solid #00bfff !important;
+    border:1px solid {C['border']};
+    background:{C['surface_alt']};
+    color:{C['text']};
+}}
+
+/* SOURCE SUMMARY — FIX: latar adaptif + font terbaca */
+.source-summary {{
+    background:{C['accent_bg']};
+    border-left:4px solid {C['accent']};
+    color:{C['text']};
+    padding:0.75rem 1rem; margin:1rem 0;
+    border-radius:0 6px 6px 0; font-size:0.92rem;
+    line-height:1.5;
+}}
+.source-summary strong {{ color:{C['accent']}; }}
+
+/* CONTEXT WARNING — adaptif */
+.context-warning {{
+    background:{C['warn_bg']};
+    border-left:4px solid {C['warn_border']};
+    color:{C['text']};
+    padding:0.9rem 1.1rem; margin:1rem 0;
+    border-radius:0 6px 6px 0; font-size:0.92rem;
+    line-height:1.55;
+}}
+
+/* HISTORY BOX — tetap kontras di kedua tema */
+.history-box {{
+    background:#012456 !important;
+    border:2px solid #00bfff !important;
     border-radius:8px; padding:1rem 1.2rem; margin-top:0.6rem;
     font-family:'Consolas','Courier New',monospace !important;
     font-size:0.9rem; color:#ffff00 !important;
-}
-.mermaid { background:#f8f9fa; padding:1rem; border-radius:8px; margin:1rem 0; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
+    max-height:400px; overflow-y:auto;
+}}
 
+/* CODE FALLBACK — adaptif */
+.code-fallback {{
+    background:{C['code_bg']};
+    border:1px solid {C['border']};
+    border-radius:6px; padding:0.8rem;
+    color:{C['text']};
+    font-family:'Consolas','Courier New',monospace;
+    font-size:0.85rem; white-space:pre-wrap; word-break:break-word;
+    margin:0.5rem 0;
+}}
+.code-fallback-error {{
+    border-left:4px solid {C['error']};
+    background:{C['error_bg']};
+}}
+.code-fallback-error .err-msg {{
+    color:{C['error']}; font-weight:600; margin-top:0.5rem;
+    font-family:inherit; font-size:0.85rem;
+}}
+
+/* SIDEBAR NAV */
+section[data-testid="stSidebar"] .stRadio > label {{
+    font-weight:600; font-size:0.85rem;
+    text-transform:uppercase; letter-spacing:0.05em;
+    color:{C['text_muted']};
+}}
+</style>
+""", unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════
 # MODEL REGISTRY
 # ═════════════════════════════════════════════════════════════
-PROVIDER_CHOICES: List[Dict[str, Any]] = [
-    # ─── Groq ────────────────────────────────────────────────
-    {"id": "groq:openai/gpt-oss-20b", "provider": "groq",
-     "model": "openai/gpt-oss-20b", "label": "Groq · gpt-oss-20b",
-     "desc": "Aktif · cepat (default)",
-     "type": "text", "max_files": 0, "accept": []},
-    {"id": "groq:openai/gpt-oss-120b", "provider": "groq",
-     "model": "openai/gpt-oss-120b", "label": "Groq · gpt-oss-120b",
-     "desc": "Aktif · lebih kuat",
-     "type": "text", "max_files": 0, "accept": []},
-    {"id": "groq:qwen/qwen3.6-27b", "provider": "groq",
-     "model": "qwen/qwen3.6-27b", "label": "Groq · qwen3.6-27b (Vision)",
-     "desc": "Aktif · Multimodal · Reasoning",
-     "type": "multimodal", "max_files": 5,
-     "accept": ["png", "jpg", "jpeg", "webp", "gif"]},
-    {"id": "groq:qwen/qwen3.8-27b", "provider": "groq",
-     "model": "qwen/qwen3.8-27b", "label": "Groq · qwen3.8-27b (Vision)",
-     "desc": "Aktif · Multimodal · Thinking",
-     "type": "multimodal", "max_files": 3,
-     "accept": ["png", "jpg", "jpeg", "webp", "gif"]},
-    # ─── OpenRouter FREE ─────────────────────────────────────
-    {"id": "openrouter:meta-llama/llama-3.3-70b-instruct:free",
-     "provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free",
-     "label": "OpenRouter · llama-3.3-70b:free", "desc": "FREE · Stabil & kuat",
-     "type": "text", "max_files": 0, "accept": []},
-    {"id": "openrouter:openai/gpt-oss-20b:free", "provider": "openrouter",
-     "model": "openai/gpt-oss-20b:free",
-     "label": "OpenRouter · gpt-oss-20b:free", "desc": "FREE · General purpose",
-     "type": "text", "max_files": 0, "accept": []},
-    {"id": "openrouter:google/gemma-4-31b-it:free", "provider": "openrouter",
-     "model": "google/gemma-4-31b-it:free",
-     "label": "OpenRouter · gemma-4-31b:free (Vision)", "desc": "FREE · Multimodal kuat",
-     "type": "multimodal", "max_files": 4,
-     "accept": ["png", "jpg", "jpeg", "webp", "gif"]},
-    {"id": "openrouter:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-     "provider": "openrouter",
-     "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-     "label": "OpenRouter · nemotron-omni:free (Vision)",
-     "desc": "FREE · Text+Image+Video",
-     "type": "multimodal", "max_files": 3,
-     "accept": ["png", "jpg", "jpeg", "webp", "gif"]},
-    # ─── Hugging Face ────────────────────────────────────────
-    {"id": "hf:meta-llama/Llama-3.1-8B-Instruct", "provider": "hf",
-     "model": "meta-llama/Llama-3.1-8B-Instruct",
-     "label": "HF · Llama-3.1-8B-Instruct", "desc": "HF · Bisa 402 jika kredit habis",
-     "type": "text", "max_files": 0, "accept": []},
-    {"id": "hf:Qwen/Qwen2.5-72B-Instruct", "provider": "hf",
-     "model": "Qwen/Qwen2.5-72B-Instruct",
-     "label": "HF · Qwen2.5-72B-Instruct", "desc": "HF · Reasoning kuat",
-     "type": "text", "max_files": 0, "accept": []},
-    {"id": "hf:Qwen/Qwen2.5-VL-72B-Instruct", "provider": "hf",
-     "model": "Qwen/Qwen2.5-VL-72B-Instruct",
-     "label": "HF · Qwen2.5-VL-72B (Vision)", "desc": "HF · Multimodal",
-     "type": "multimodal", "max_files": 5,
-     "accept": ["png", "jpg", "jpeg", "webp", "gif", "pdf", "txt", "md"]},
-    {"id": "hf:google/gemma-3-4b-it", "provider": "hf",
-     "model": "google/gemma-3-4b-it",
-     "label": "HF · gemma-3-4b-it (Vision)", "desc": "HF · Vision ringan",
-     "type": "vision", "max_files": 3,
-     "accept": ["png", "jpg", "jpeg", "webp", "gif"]},
+PROVIDER_CHOICES = [
+    {"id":"groq:openai/gpt-oss-20b","provider":"groq","model":"openai/gpt-oss-20b",
+     "label":"Groq · gpt-oss-20b","desc":"Aktif · cepat (default)",
+     "type":"text","max_files":0,"accept":[]},
+    {"id":"groq:openai/gpt-oss-120b","provider":"groq","model":"openai/gpt-oss-120b",
+     "label":"Groq · gpt-oss-120b","desc":"Aktif · lebih kuat",
+     "type":"text","max_files":0,"accept":[]},
+    {"id":"groq:qwen/qwen3.6-27b","provider":"groq","model":"qwen/qwen3.6-27b",
+     "label":"Groq · qwen3.6-27b (Vision)","desc":"Aktif · Multimodal",
+     "type":"multimodal","max_files":5,
+     "accept":["png","jpg","jpeg","webp","gif"]},
+    {"id":"groq:qwen/qwen3.8-27b","provider":"groq","model":"qwen/qwen3.8-27b",
+     "label":"Groq · qwen3.8-27b (Vision)","desc":"Aktif · Multimodal · Thinking",
+     "type":"multimodal","max_files":3,
+     "accept":["png","jpg","jpeg","webp","gif"]},
+    {"id":"openrouter:meta-llama/llama-3.3-70b-instruct:free","provider":"openrouter",
+     "model":"meta-llama/llama-3.3-70b-instruct:free",
+     "label":"OpenRouter · llama-3.3-70b:free","desc":"FREE · Stabil",
+     "type":"text","max_files":0,"accept":[]},
+    {"id":"openrouter:openai/gpt-oss-20b:free","provider":"openrouter",
+     "model":"openai/gpt-oss-20b:free","label":"OpenRouter · gpt-oss-20b:free",
+     "desc":"FREE · General","type":"text","max_files":0,"accept":[]},
+    {"id":"openrouter:google/gemma-4-31b-it:free","provider":"openrouter",
+     "model":"google/gemma-4-31b-it:free",
+     "label":"OpenRouter · gemma-4-31b:free (Vision)","desc":"FREE · Multimodal",
+     "type":"multimodal","max_files":4,
+     "accept":["png","jpg","jpeg","webp","gif"]},
+    {"id":"openrouter:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+     "provider":"openrouter",
+     "model":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+     "label":"OpenRouter · nemotron-omni:free (Vision)","desc":"FREE · Text+Image",
+     "type":"multimodal","max_files":3,
+     "accept":["png","jpg","jpeg","webp","gif"]},
+    {"id":"hf:meta-llama/Llama-3.1-8B-Instruct","provider":"hf",
+     "model":"meta-llama/Llama-3.1-8B-Instruct",
+     "label":"HF · Llama-3.1-8B-Instruct","desc":"HF · Bisa 402",
+     "type":"text","max_files":0,"accept":[]},
+    {"id":"hf:Qwen/Qwen2.5-72B-Instruct","provider":"hf",
+     "model":"Qwen/Qwen2.5-72B-Instruct",
+     "label":"HF · Qwen2.5-72B-Instruct","desc":"HF · Reasoning kuat",
+     "type":"text","max_files":0,"accept":[]},
+    {"id":"hf:Qwen/Qwen2.5-VL-72B-Instruct","provider":"hf",
+     "model":"Qwen/Qwen2.5-VL-72B-Instruct",
+     "label":"HF · Qwen2.5-VL-72B (Vision)","desc":"HF · Multimodal",
+     "type":"multimodal","max_files":5,
+     "accept":["png","jpg","jpeg","webp","gif","pdf","txt","md"]},
+    {"id":"hf:google/gemma-3-4b-it","provider":"hf","model":"google/gemma-3-4b-it",
+     "label":"HF · gemma-3-4b-it (Vision)","desc":"HF · Vision ringan",
+     "type":"vision","max_files":3,"accept":["png","jpg","jpeg","webp","gif"]},
 ]
-CHOICE_BY_ID: Dict[str, Dict[str, Any]] = {c["id"]: c for c in PROVIDER_CHOICES}
+CHOICE_BY_ID = {c["id"]: c for c in PROVIDER_CHOICES}
 DEFAULT_CHOICE_ID = "groq:openai/gpt-oss-20b"
 
-# ─────────────────────────────────────────────────────────────
-# MULTI-LANGUAGE
-# ─────────────────────────────────────────────────────────────
 LANG_OPTIONS = {
-    "id": "🇮🇩 Bahasa Indonesia (default)",
-    "en": "🇬🇧 English",
-    "ms": "🇲🇾 Bahasa Melayu",
-    "auto": "🌐 Auto (ikuti bahasa pertanyaan)",
+    "id":"🇮🇩 Bahasa Indonesia","en":"🇬🇧 English",
+    "ms":"🇲🇾 Bahasa Melayu","auto":"🌐 Auto",
 }
 LANG_INSTRUCTIONS = {
-    "id": "Selalu jawab dalam Bahasa Indonesia yang profesional, jelas, dan terstruktur.",
-    "en": "Always answer in professional, clear, and well-structured English.",
-    "ms": "Sentiasa jawab dalam Bahasa Melayu yang profesional, jelas, dan berstruktur.",
-    "auto": ("Jawab dalam bahasa yang sama dengan pertanyaan pengguna. "
-             "Jika ambigu, gunakan Bahasa Indonesia."),
+    "id":"Selalu jawab dalam Bahasa Indonesia yang profesional, jelas, dan terstruktur.",
+    "en":"Always answer in professional, clear, and well-structured English.",
+    "ms":"Sentiasa jawab dalam Bahasa Melayu yang profesional, jelas, dan berstruktur.",
+    "auto":"Jawab dalam bahasa yang sama dengan pertanyaan pengguna. Jika ambigu, gunakan Bahasa Indonesia.",
 }
 
-
-# ═════════════════════════════════════════════════════════════
-# SPECIALIZED SOURCES + KEY FACTS FALLBACK
-# ═════════════════════════════════════════════════════════════
+# ── SOURCES ──────────────────────────────────────────────────
 SPECIALIZED_SOURCES = {
-    "dc": {
-        "name": "Live Data Center Asia Pacific",
-        "url": "https://narational.byethost11.com/Live_DC_ASPAC.html",
-        "description": (
-            "Curated Research Dashboard + Query Launcher • 7 Klasifikasi Industri DC APAC. "
-            "Fokus Indonesia + koridor digital Asia Pacific. Agregasi berita & riset realtime "
-            "periode 2-3 bulan terakhir. Oleh nap@iicf.or.id."
-        ),
-        "keywords": ["data center", "datacenter", "hyperscale", "AI campus", "GPU",
-                     "Batam", "Nongsa", "BATIC", "grid readiness", "CoreWeave", "Firmus"],
-    },
-    "fo": {
-        "name": "Live Fiber Optic & Submarine Cable Asia Pacific",
-        "url": "https://narational.byethost11.com/Live_FOSubsea_ASPAC.html",
-        "description": (
-            "Curated Research Dashboard • 8 Klasifikasi Industri Fiber Optic & SubSEA APAC. "
-            "Proyek kabel laut domestik, landing station, backbone terestrial, coherent optics. "
-            "Oleh nap@iicf.or.id."
-        ),
-        "keywords": ["submarine cable", "subsea", "fiber optic", "kabel laut",
-                     "landing station", "Nongsa-Changi", "Echo cable", "Telin",
-                     "WaveLogic", "backbone"],
-    },
+    "dc":{"name":"Live Data Center Asia Pacific",
+          "url":"https://narational.byethost11.com/Live_DC_ASPAC.html",
+          "description":"Curated Research Dashboard • 7 klasifikasi industri DC APAC. Fokus Indonesia + APAC. Oleh nap@iicf.or.id.",
+          "keywords":["data center","datacenter","hyperscale","AI campus","GPU","Batam","Nongsa","BATIC","CoreWeave","Firmus"]},
+    "fo":{"name":"Live Fiber Optic & Submarine Cable Asia Pacific",
+          "url":"https://narational.byethost11.com/Live_FOSubsea_ASPAC.html",
+          "description":"Curated Research Dashboard • 8 klasifikasi industri FO & SubSEA APAC. Oleh nap@iicf.or.id.",
+          "keywords":["submarine cable","subsea","fiber optic","kabel laut","landing station","Nongsa-Changi","Echo","Telin"]},
 }
 
 KEY_FACTS_DC = """=== KEY FACTS LIVE DC ASPAC (snapshot ~Sep 2026) ===
-- CoreWeave mengumumkan data center pertama di Asia-Pacific di Indonesia (target online 2028).
-- Firmus Technologies + NVIDIA: kampus AI Factory 360 MW di Batam (bersama DayOne), hingga ~170.000 GPU, target live Q1 2027.
-- DayOne mengembangkan kapasitas signifikan di Batam; Batam/Nongsa menjadi magnet investor.
-- BATIC 2026 (Bali) menekankan infrastruktur digital & AI sebagai pendorong pertumbuhan.
-- Forum Grid Readiness membahas kesiapan jaringan listrik Indonesia untuk DC hyperscale & AI.
-- Klasifikasi dashboard: A Business, B AI/HPC, C Power, D Water, E Regulatory, F Industrial, G Sovereign.
-- Periode fokus: ~16 Jul – 16 Sep 2026. Selalu sebutkan URL dashboard jika memakai fakta ini.
-[CATATAN: KEY FACTS ini snapshot; verifikasi angka spesifik langsung ke dashboard.]
-"""
+- CoreWeave: DC pertama di Asia-Pacific di Indonesia (target 2028).
+- Firmus Technologies + NVIDIA: AI Factory 360 MW di Batam, ~170.000 GPU, target Q1 2027.
+- DayOne mengembangkan kapasitas signifikan di Batam.
+- BATIC 2026 (Bali) menekankan infrastruktur digital & AI.
+- Periode fokus: ~16 Jul – 16 Sep 2026.
+[CATATAN: verifikasi angka spesifik ke dashboard.]"""
 
 KEY_FACTS_FO = """=== KEY FACTS LIVE FO & SUBSEA ASPAC (snapshot ~Sep 2026) ===
-- Nongsa-Changi Cable (NCC) mendarat ~20 Juli 2026 di Nongsa Digital Park, Batam (Telin + BW Digital). Panjang ~50 km, 24 fiber pairs, kapasitas >1,6 Pbps.
-- Sistem Echo (Google & Meta) mendarat di Singapore; arsitektur melibatkan Indonesia.
-- ION Cable System dan coherent optics (Ciena WaveLogic) memperkuat backbone Jakarta–Singapore + Sumatra.
-- Telkom via Telin memperkuat ambisi Indonesia sebagai Hub Internet Asia Pasifik.
-- Pemerintah menyiapkan landing station baru sesuai regulasi.
-- Periode fokus: ~16 Jun – 16 Sep 2026. Selalu sebutkan URL dashboard jika memakai fakta ini.
-[CATATAN: KEY FACTS ini snapshot; verifikasi angka spesifik langsung ke dashboard.]
-"""
-
+- Nongsa-Changi Cable (NCC) mendarat ~20 Juli 2026 di Nongsa Digital Park (Telin + BW Digital). 24 fiber pairs, >1.6 Pbps.
+- Sistem Echo (Google & Meta) mendarat di Singapore; melibatkan Indonesia.
+- ION Cable System & Ciena WaveLogic memperkuat backbone Jakarta–Singapore.
+- Telkom via Telin memperkuat ambisi Indonesia sebagai Hub Internet APAC.
+- Periode fokus: ~16 Jun – 16 Sep 2026.
+[CATATAN: verifikasi angka spesifik ke dashboard.]"""
 
 # ═════════════════════════════════════════════════════════════
 # UTILS
 # ═════════════════════════════════════════════════════════════
 def _is_private_ip(ip: str) -> bool:
-    """Cek apakah IP privat, loopback, link-local, atau CGNAT."""
-    if not ip or ip == "unknown":
-        return True
+    if not ip or ip == "unknown": return True
     try:
-        parts = [int(p) for p in ip.split(".")]
-        if len(parts) != 4:
-            return True
-        a, b = parts[0], parts[1]
-        if a == 10 or a == 127 or a == 0 or a >= 224:
-            return True
-        if a == 172 and 16 <= b <= 31:
-            return True
-        if a == 192 and b == 168:
-            return True
-        if a == 169 and b == 254:  # link-local
-            return True
-        if a == 100 and 64 <= b <= 127:  # CGNAT
-            return True
+        p = [int(x) for x in ip.split(".")]
+        if len(p) != 4: return True
+        a, b = p[0], p[1]
+        if a in (10, 127, 0) or a >= 224: return True
+        if a == 172 and 16 <= b <= 31: return True
+        if a == 192 and b == 168: return True
+        if a == 169 and b == 254: return True
+        if a == 100 and 64 <= b <= 127: return True
         return False
-    except Exception:  # noqa: BLE001
-        return True
-
+    except Exception: return True
 
 def safe_get_ip_and_country() -> Tuple[str, str]:
-    """Best-effort IP + country. Soft-fail → ('unknown', 'unknown')."""
     ip, country = "unknown", "unknown"
     try:
-        headers: Dict[str, str] = {}
+        headers = {}
         if hasattr(st, "context") and st.context:
-            try:
-                headers = dict(st.context.headers or {})
-            except Exception:  # noqa: BLE001
-                headers = {}
-        candidates: List[str] = []
-        for key in ("X-Forwarded-For", "x-forwarded-for",
-                    "X-Real-IP", "x-real-ip",
-                    "CF-Connecting-IP", "cf-connecting-ip",
-                    "True-Client-IP", "true-client-ip"):
-            val = headers.get(key)
-            if not val:
-                continue
-            for part in str(val).replace("for=", "").split(","):
-                part = part.strip().strip('"').split(";")[0].strip()
-                if part and part not in candidates:
-                    candidates.append(part)
-        for cand in candidates:
-            if not _is_private_ip(cand):
-                ip = cand
-                break
+            try: headers = dict(st.context.headers or {})
+            except Exception: headers = {}
+        cands = []
+        for k in ("X-Forwarded-For","x-forwarded-for","X-Real-IP","x-real-ip",
+                  "CF-Connecting-IP","cf-connecting-ip","True-Client-IP","true-client-ip"):
+            v = headers.get(k)
+            if not v: continue
+            for part in str(v).replace("for=","").split(","):
+                p = part.strip().strip('"').split(";")[0].strip()
+                if p and p not in cands: cands.append(p)
+        for c in cands:
+            if not _is_private_ip(c): ip = c; break
         if ip == "unknown" or _is_private_ip(ip):
             try:
                 r = requests.get("https://ipapi.co/json/", timeout=4)
                 if r.status_code == 200:
-                    data = r.json()
-                    pub = data.get("ip", "")
+                    d = r.json(); pub = d.get("ip","")
                     if pub and not _is_private_ip(pub):
-                        ip = pub
-                        country = (data.get("country_name")
-                                   or data.get("country_code")
-                                   or country)
-            except Exception:  # noqa: BLE001
-                pass
+                        ip = pub; country = d.get("country_name") or d.get("country_code") or country
+            except Exception: pass
         if ip != "unknown" and not _is_private_ip(ip) and country == "unknown":
             try:
                 r = requests.get(f"https://ipapi.co/{ip}/json/", timeout=4)
                 if r.status_code == 200:
-                    data = r.json()
-                    country = (data.get("country_name")
-                               or data.get("country_code")
-                               or country)
-            except Exception:  # noqa: BLE001
-                pass
+                    d = r.json(); country = d.get("country_name") or d.get("country_code") or country
+            except Exception: pass
         if _is_private_ip(ip):
             ip = "internal"
-            if country == "unknown":
-                country = "Streamlit Cloud"
-    except Exception:  # noqa: BLE001
-        pass
+            if country == "unknown": country = "Streamlit Cloud"
+    except Exception: pass
     return ip, country
 
-
 def get_external_referrer() -> str:
-    """Referer eksternal (bukan domain app sendiri). Empty string jika tidak ada."""
     try:
-        headers: Dict[str, str] = {}
+        headers = {}
         if hasattr(st, "context") and st.context:
-            try:
-                headers = st.context.headers or {}
-            except Exception:  # noqa: BLE001
-                headers = {}
-        referer = str(headers.get("Referer")
-                      or headers.get("referer")
-                      or headers.get("Referrer")
-                      or headers.get("referrer")
-                      or "").strip()
-        if not referer:
-            return ""
-        own_domains = ("telco-digital-ai.streamlit.app", "localhost",
-                       "127.0.0.1", "streamlit.app")
-        low = referer.lower()
-        if any(d in low for d in own_domains):
-            return ""
-        return referer[:500]
-    except Exception:  # noqa: BLE001
-        return ""
-
+            try: headers = st.context.headers or {}
+            except Exception: headers = {}
+        ref = str(headers.get("Referer") or headers.get("referer") or "").strip()
+        if not ref: return ""
+        own = ("telco-digital-ai.streamlit.app","localhost","127.0.0.1","streamlit.app")
+        if any(d in ref.lower() for d in own): return ""
+        return ref[:500]
+    except Exception: return ""
 
 def generate_session_id() -> str:
     if "session_id" not in st.session_state:
         st.session_state["session_id"] = str(uuid.uuid4())[:12]
     return st.session_state["session_id"]
 
-
-def sanitize_text(text: str, max_len: int = 4000) -> str:
-    if not text:
-        return ""
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(text))
-    return text[:max_len]
-
+def sanitize_text(t: str, n: int = 4000) -> str:
+    if not t: return ""
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]","",str(t))[:n]
 
 def _get_secret(*names: str) -> Optional[str]:
     for n in names:
         try:
             v = st.secrets.get(n)
-            if v is None:
-                continue
+            if v is None: continue
             s = str(v).strip().strip('"').strip("'")
-            if s and s not in ("None", "null"):
-                return s
-        except Exception:  # noqa: BLE001
-            continue
+            if s and s not in ("None","null"): return s
+        except Exception: continue
     return None
 
-
 def get_api_keys() -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    hf = _get_secret("HF_TOKEN", "hf_token")
-    groq = _get_secret("GROQ_API_KEY", "groq_api_key", "GROQ_KEY")
-    ork = _get_secret("OPENROUTER_API_KEY", "openrouter_api_key", "OPENROUTER_KEY")
-    return hf, groq, ork
+    return (_get_secret("HF_TOKEN","hf_token"),
+            _get_secret("GROQ_API_KEY","groq_api_key","GROQ_KEY"),
+            _get_secret("OPENROUTER_API_KEY","openrouter_api_key","OPENROUTER_KEY"))
 
-
-def estimate_tokens(text: str) -> int:
-    """Estimasi kasar: ~3.5 karakter/token untuk campuran ID/EN."""
-    if not text:
-        return 0
-    return max(1, int(len(text) / 3.5))
-
+def estimate_tokens(t: str) -> int:
+    return max(1, int(len(t)/3.5)) if t else 0
 
 # ═════════════════════════════════════════════════════════════
-# RATE LIMITING
+# RATE LIMIT
 # ═════════════════════════════════════════════════════════════
 def _rate_limit_check() -> Tuple[bool, str]:
-    """Return (allowed, message). Sliding window per session."""
     now = time.time()
-    timestamps: deque = st.session_state.get("_rate_ts", deque())
-    # Buang timestamp di luar window
-    while timestamps and (now - timestamps[0]) > RATE_LIMIT_WINDOW_SEC:
-        timestamps.popleft()
-    if len(timestamps) >= RATE_LIMIT_MAX_QUERIES:
-        wait = int(RATE_LIMIT_WINDOW_SEC - (now - timestamps[0])) + 1
-        st.session_state["_rate_ts"] = timestamps
-        return False, (f"Batas {RATE_LIMIT_MAX_QUERIES} query / "
-                       f"{RATE_LIMIT_WINDOW_SEC // 60} menit tercapai. "
-                       f"Coba lagi dalam ~{wait} detik.")
-    timestamps.append(now)
-    st.session_state["_rate_ts"] = timestamps
+    ts: deque = st.session_state.get("_rate_ts", deque())
+    while ts and (now - ts[0]) > RATE_LIMIT_WINDOW_SEC: ts.popleft()
+    if len(ts) >= RATE_LIMIT_MAX_QUERIES:
+        wait = int(RATE_LIMIT_WINDOW_SEC - (now - ts[0])) + 1
+        st.session_state["_rate_ts"] = ts
+        return False, f"Batas {RATE_LIMIT_MAX_QUERIES} query / {RATE_LIMIT_WINDOW_SEC//60} menit. Coba lagi ~{wait}s."
+    ts.append(now); st.session_state["_rate_ts"] = ts
     return True, ""
-
 
 # ═════════════════════════════════════════════════════════════
 # SUPABASE LOGGING
@@ -505,94 +433,68 @@ def _rate_limit_check() -> Tuple[bool, str]:
 def get_supabase_table_name() -> str:
     return _get_secret("SUPABASE_TABLE") or DEFAULT_SUPABASE_TABLE
 
-
 def get_supabase_client(admin: bool = False) -> Optional["Client"]:
-    if not SUPABASE_AVAILABLE:
-        return None
+    if not SUPABASE_AVAILABLE: return None
     try:
         url = _get_secret("SUPABASE_URL")
         if admin:
-            key = (_get_secret("SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY")
-                   or _get_secret("SUPABASE_KEY", "SUPABASE_ANON_KEY"))
+            key = (_get_secret("SUPABASE_SERVICE_KEY","SUPABASE_SERVICE_ROLE_KEY")
+                   or _get_secret("SUPABASE_KEY","SUPABASE_ANON_KEY"))
         else:
-            key = _get_secret("SUPABASE_KEY", "SUPABASE_ANON_KEY")
-        if not url or not key:
-            return None
+            key = _get_secret("SUPABASE_KEY","SUPABASE_ANON_KEY")
+        if not url or not key: return None
         return create_client(url, key)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         if st.session_state.get("debug_mode"):
-            st.warning(f"[Supabase client] {e}")
+            st.warning(f"[Supabase] {e}")
         return None
-
 
 def append_behavior_log(row: Dict[str, Any]) -> Tuple[bool, str]:
     try:
-        client = get_supabase_client()
-        if client is None:
-            reason = ("Supabase library missing" if not SUPABASE_AVAILABLE
-                      else "SUPABASE_URL / SUPABASE_KEY tidak terbaca")
-            return False, reason
-        table = get_supabase_table_name()
+        c = get_supabase_client()
+        if c is None:
+            return False, ("Supabase library missing" if not SUPABASE_AVAILABLE
+                           else "SUPABASE_URL / SUPABASE_KEY tidak terbaca")
+        t = get_supabase_table_name()
         clean = {k: ("" if v is None else str(v)) for k, v in row.items()}
-        client.table(table).insert(clean).execute()
-        return True, f"OK → tabel `{table}`"
-    except Exception as e:  # noqa: BLE001
-        msg = str(e)[:300]
-        if st.session_state.get("debug_mode"):
-            st.warning(f"[Log] Gagal tulis: {msg}")
-        return False, msg
+        c.table(t).insert(clean).execute()
+        return True, f"OK → tabel `{t}`"
+    except Exception as e:
+        return False, str(e)[:300]
 
-
-def log_access(
-    feature: str,
-    prompt: str = "",
-    answer: str = "",
-    model: str = "",
-    files_count: int = 0,
-    web_search: bool = False,
-    specialized: bool = False,
-    error_note: str = "",
-    feedback: str = "",
-) -> Tuple[bool, str]:
+def log_access(feature: str, prompt: str = "", answer: str = "", model: str = "",
+               files_count: int = 0, web_search: bool = False,
+               specialized: bool = False, error_note: str = "",
+               feedback: str = "") -> Tuple[bool, str]:
     try:
         ip, country = safe_get_ip_and_country()
         ua = ""
         try:
-            headers = st.context.headers if hasattr(st, "context") else {}
-            ua = headers.get("User-Agent", "") or headers.get("user-agent", "")
-        except Exception:  # noqa: BLE001
-            pass
+            h = st.context.headers if hasattr(st, "context") else {}
+            ua = h.get("User-Agent","") or h.get("user-agent","")
+        except Exception: pass
         row = {
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-            "session_id": generate_session_id(),
-            "ip": ip,
-            "country": country,
-            "origin_url": get_external_referrer(),
-            "feature": feature,
-            "model": model,
+            "session_id": generate_session_id(), "ip": ip, "country": country,
+            "origin_url": get_external_referrer(), "feature": feature, "model": model,
             "prompt_snippet": sanitize_text(prompt, MAX_LOG_PROMPT_LEN),
             "answer_snippet": sanitize_text(answer, MAX_LOG_ANSWER_LEN),
-            "files_uploaded": files_count,
-            "web_search_used": web_search,
+            "files_uploaded": files_count, "web_search_used": web_search,
             "specialized_used": specialized,
             "user_agent": sanitize_text(ua, 200),
-            "app_version": APP_VERSION,
-            "error_note": sanitize_text(error_note, 300),
+            "app_version": APP_VERSION, "error_note": sanitize_text(error_note, 300),
             "feedback": feedback,
         }
         return append_behavior_log(row)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return False, str(e)[:200]
 
-
 # ═════════════════════════════════════════════════════════════
-# MODEL AVAILABILITY (cached)
+# MODEL AVAILABILITY
 # ═════════════════════════════════════════════════════════════
 @st.cache_data(ttl=600, show_spinner=False)
 def check_model_availability(provider: str, model: str, api_key: str) -> Tuple[bool, str]:
-    """Probe ringan. Return (ok, note)."""
-    if not api_key:
-        return False, "no API key"
+    if not api_key: return False, "no API key"
     try:
         if provider == "groq":
             url = API_URL_GROQ
@@ -606,1037 +508,716 @@ def check_model_availability(provider: str, model: str, api_key: str) -> Tuple[b
                        "X-Title": "ID Telco Digital AI"}
         else:
             return True, "hf (not probed)"
-        payload = {"model": model,
-                   "messages": [{"role": "user", "content": "ping"}],
+        payload = {"model": model, "messages": [{"role": "user", "content": "ping"}],
                    "max_tokens": 1}
         r = requests.post(url, json=payload, headers=headers, timeout=12)
-        if r.status_code in (200, 201):
-            return True, "ok"
-        if r.status_code == 429:
-            return True, "rate-limited (masih terdaftar)"
-        if r.status_code in (401, 403):
-            return False, "auth"
-        if r.status_code == 402:
-            return False, "payment / free quota"
+        if r.status_code in (200, 201): return True, "ok"
+        if r.status_code == 429: return True, "rate-limited"
+        if r.status_code in (401, 403): return False, "auth"
+        if r.status_code == 402: return False, "payment"
         return False, f"HTTP {r.status_code}"
-    except requests.exceptions.Timeout:
-        return False, "timeout"
-    except Exception as e:  # noqa: BLE001
-        return False, str(e)[:80]
-
+    except requests.exceptions.Timeout: return False, "timeout"
+    except Exception as e: return False, str(e)[:80]
 
 # ═════════════════════════════════════════════════════════════
-# SEARCH & SCRAPE (dengan caching)
+# SEARCH & SCRAPE
 # ═════════════════════════════════════════════════════════════
 @st.cache_data(ttl=300, show_spinner=False)
 def ddg_fetch(query: str, max_results: int = 4) -> Tuple[List[Dict[str, Any]], str]:
-    if not DDG_AVAILABLE:
-        return [], f"duckduckgo-search tidak tersedia ({DDG_ERROR})"
+    if not DDG_AVAILABLE: return [], f"duckduckgo-search tidak tersedia ({DDG_ERROR})"
     try:
-        with DDGS() as ddgs:
-            res = list(ddgs.text(query, max_results=max_results))
+        with DDGS() as d:
+            res = list(d.text(query, max_results=max_results))
         return res, ""
-    except Exception as e:  # noqa: BLE001
-        msg = str(e)[:150]
-        if "429" in msg or "Ratelimit" in msg.lower():
+    except Exception as e:
+        m = str(e)[:150]
+        if "429" in m or "Ratelimit" in m.lower():
             return [], "DuckDuckGo rate-limit. Coba beberapa menit lagi."
-        return [], msg
-
+        return [], m
 
 @st.cache_data(ttl=300, show_spinner=False)
 def scrape_dashboard(url: str, max_chars: int = 2500) -> Tuple[str, str, str]:
-    """Return (text, status, detail). Status: ok|blocked|js_required|empty|error|library_missing."""
-    if not BS4_AVAILABLE:
-        return "", "library_missing", "beautifulsoup4 tidak terinstall"
+    """Return (text, status, detail)."""
+    if not BS4_AVAILABLE: return "", "library_missing", "bs4 tidak terinstall"
     try:
-        headers = {
-            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                           "AppleWebKit/537.36 (KHTML, like Gecko) "
-                           "Chrome/120.0.0.0 Safari/537.36"),
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "en-US,id;q=0.9",
-        }
-        r = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+        h = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+             "Accept": "text/html,application/xhtml+xml"}
+        r = requests.get(url, headers=h, timeout=10, allow_redirects=True)
         low = (r.text or "")[:4000].lower()
-        if (r.status_code in (403, 503)
-                or "cloudflare" in low
-                or "just a moment" in low
-                or "checking your browser" in low
-                or "access denied" in low):
-            return "", "blocked", f"HTTP {r.status_code} — proteksi anti-bot"
-        if r.status_code != 200:
-            return "", "error", f"HTTP {r.status_code}"
+        if r.status_code in (403,503) or "cloudflare" in low or "just a moment" in low \
+                or "checking your browser" in low or "access denied" in low:
+            return "", "blocked", f"HTTP {r.status_code} — anti-bot"
+        if r.status_code != 200: return "", "error", f"HTTP {r.status_code}"
         soup = BeautifulSoup(r.text, "lxml")
-        for tag in soup(["script", "style", "noscript"]):
-            tag.decompose()
-        text = soup.get_text(separator="\n", strip=True)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        if "requires javascript" in text.lower()[:800] or "enable javascript" in low:
-            return "", "js_required", "halaman butuh JavaScript"
-        if len(text) < 200:
-            return "", "empty", f"konten hanya {len(text)} karakter"
+        for t in soup(["script","style","noscript"]): t.decompose()
+        text = re.sub(r"\n{3,}", "\n\n", soup.get_text(separator="\n", strip=True))
+        if "requires javascript" in text.lower()[:800]: return "", "js_required", "butuh JS"
+        if len(text) < 200: return "", "empty", f"{len(text)} char"
         return text[:max_chars], "ok", ""
-    except requests.exceptions.Timeout:
-        return "", "error", "timeout"
-    except Exception as e:  # noqa: BLE001
-        return "", "error", str(e)[:120]
-
+    except requests.exceptions.Timeout: return "", "error", "timeout"
+    except Exception as e: return "", "error", str(e)[:120]
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_rss_headlines(category: str) -> List[str]:
-    """Google News RSS — ambil 5 judul terbaru. Soft-fail → []."""
-    rss_map = {
-        "dc": ("https://news.google.com/rss/search?"
-               "q=Data+Center+Indonesia+Batam+OR+CoreWeave+OR+Firmus&hl=id&gl=ID&ceid=ID:id"),
-        "fo": ("https://news.google.com/rss/search?"
-               "q=Submarine+Cable+Indonesia+OR+Nongsa+OR+Echo+Cable&hl=id&gl=ID&ceid=ID:id"),
-    }
-    url = rss_map.get(category)
-    if not url:
-        return []
+def fetch_rss_headlines(cat: str) -> List[str]:
+    rss = {"dc": "https://news.google.com/rss/search?q=Data+Center+Indonesia+Batam+OR+CoreWeave+OR+Firmus&hl=id&gl=ID&ceid=ID:id",
+           "fo": "https://news.google.com/rss/search?q=Submarine+Cable+Indonesia+OR+Nongsa+OR+Echo+Cable&hl=id&gl=ID&ceid=ID:id"}
+    url = rss.get(cat)
+    if not url: return []
     try:
         r = requests.get(url, timeout=6)
-        if r.status_code != 200:
-            return []
+        if r.status_code != 200: return []
         root = ET.fromstring(r.content)
-        titles = []
-        for item in root.findall(".//item")[:5]:
-            t = item.findtext("title")
-            if t:
-                titles.append(t.strip())
-        return titles
-    except Exception:  # noqa: BLE001
-        return []
-
+        return [i.text.strip() for i in root.findall(".//item")[:5] if i.text][:5]
+    except Exception: return []
 
 # ═════════════════════════════════════════════════════════════
-# SIMPLE RAG (TF-IDF → fallback keyword overlap)
+# SIMPLE RAG
 # ═════════════════════════════════════════════════════════════
-_STOPWORDS = {
-    "yang", "dan", "di", "ke", "dari", "pada", "untuk", "dengan", "ini", "itu",
-    "apa", "bagaimana", "mengapa", "siapa", "kapan", "dimana", "jelaskan",
-    "berikan", "adalah", "atau", "juga", "akan", "bisa", "dapat", "the", "and",
-    "or", "for", "with", "what", "how", "please", "you", "are", "can", "to",
-    "of", "in", "on", "data",
-}
+_STOP = {"yang","dan","di","ke","dari","pada","untuk","dengan","ini","itu",
+         "apa","bagaimana","mengapa","siapa","kapan","dimana","jelaskan","berikan",
+         "adalah","atau","juga","akan","bisa","dapat","the","and","or","for","with",
+         "what","how","please","you","are","can","to","of","in","on"}
 
+def _split_paras(t: str) -> List[str]:
+    return [p.strip() for p in re.split(r"\n{2,}", t) if p.strip()]
 
-def _split_paragraphs(text: str) -> List[str]:
-    """Split dengan toleransi separator ganda."""
-    return [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
-
-
-def _score_paragraphs_tfidf(query: str, paras: List[str]) -> List[float]:
-    if not SKLEARN_AVAILABLE or len(paras) < 2:
-        return [0.0] * len(paras)
+def _score_tfidf(q: str, paras: List[str]) -> List[float]:
+    if not SKLEARN_AVAILABLE or len(paras) < 2: return [0.0]*len(paras)
     try:
-        vec = TfidfVectorizer(stop_words=None, min_df=1)
-        matrix = vec.fit_transform(paras + [query])
-        scores = cosine_similarity(matrix[-1], matrix[:-1]).flatten()
-        return [float(s) for s in scores]
-    except Exception:  # noqa: BLE001
-        return [0.0] * len(paras)
+        v = TfidfVectorizer(stop_words=None, min_df=1)
+        m = v.fit_transform(paras + [q])
+        return [float(s) for s in cosine_similarity(m[-1], m[:-1]).flatten()]
+    except Exception: return [0.0]*len(paras)
 
+def _score_kw(q: str, paras: List[str]) -> List[float]:
+    qt = {w for w in re.findall(r"[a-z0-9\-]{3,}", q.lower()) if w not in _STOP}
+    if not qt: return [0.0]*len(paras)
+    return [len(qt & set(re.findall(r"[a-z0-9\-]{3,}", p.lower()))) / max(1, len(qt))
+            for p in paras]
 
-def _score_paragraphs_keyword(query: str, paras: List[str]) -> List[float]:
-    qtok = {w for w in re.findall(r"[a-z0-9\-]{3,}", query.lower())
-            if w not in _STOPWORDS}
-    if not qtok:
-        return [0.0] * len(paras)
-    scores = []
-    for p in paras:
-        ptok = set(re.findall(r"[a-z0-9\-]{3,}", p.lower()))
-        scores.append(len(qtok & ptok) / max(1, len(qtok)))
-    return scores
-
-
-def simple_rag_filter(query: str, context: str, max_chars: int = MAX_CONTEXT_CHARS) -> str:
-    """
-    Filter konteks berdasarkan relevansi. Mempertahankan urutan asli paragraf.
-    Jika tidak ada paragraf relevan → potong mentah.
-    """
-    if not context:
-        return ""
-    if len(context) <= max_chars:
-        return context
-
-    paras = _split_paragraphs(context)
-    if not paras:
-        return context[:max_chars] + "\n\n[...dipotong karena batas memori...]"
-
-    scores = _score_paragraphs_tfidf(query, paras)
-    if all(s == 0.0 for s in scores):
-        scores = _score_paragraphs_keyword(query, paras)
-
-    # Seleksi top-K berdasarkan skor, tapi pertahankan urutan asli
-    indexed = list(enumerate(zip(paras, scores)))
-    indexed.sort(key=lambda x: x[1][1], reverse=True)
-
-    selected_idx: List[int] = []
-    total_len = 0
+def simple_rag_filter(query: str, ctx: str, max_chars: int = MAX_CONTEXT_CHARS) -> str:
+    if not ctx or len(ctx) <= max_chars: return ctx
+    paras = _split_paras(ctx)
+    if not paras: return ctx[:max_chars] + "\n\n[...dipotong...]"
+    scores = _score_tfidf(query, paras)
+    if all(s == 0.0 for s in scores): scores = _score_kw(query, paras)
+    indexed = sorted(enumerate(zip(paras, scores)), key=lambda x: x[1][1], reverse=True)
+    sel, total = [], 0
     for idx, (p, sc) in indexed:
-        if total_len + len(p) + 2 > max_chars:
-            break
-        if sc <= 0.0 and selected_idx:
-            # Sudah ada yang relevan; jangan tambahkan yang tidak relevan
-            continue
-        selected_idx.append(idx)
-        total_len += len(p) + 2
-        if len(selected_idx) >= RAG_TOP_K * 2:
-            break
-
-    if not selected_idx:
-        return context[:max_chars] + "\n\n[...dipotong karena batas memori...]"
-
-    selected_idx.sort()
-    result = "\n\n".join(paras[i] for i in selected_idx)
-    if len(result) < len(context):
-        result += f"\n\n[...{len(context) - len(result)} karakter tidak relevan disaring oleh RAG...]"
+        if total + len(p) + 2 > max_chars: break
+        if sc <= 0.0 and sel: continue
+        sel.append(idx); total += len(p) + 2
+        if len(sel) >= RAG_TOP_K * 2: break
+    if not sel: return ctx[:max_chars] + "\n\n[...dipotong...]"
+    sel.sort()
+    result = "\n\n".join(paras[i] for i in sel)
+    if len(result) < len(ctx):
+        result += f"\n\n[...{len(ctx)-len(result)} karakter tidak relevan disaring RAG...]"
     return result[:max_chars]
-
 
 # ═════════════════════════════════════════════════════════════
 # FILE HANDLING
 # ═════════════════════════════════════════════════════════════
-def _extract_pdf_text(data: bytes, max_chars: int = 12000) -> str:
-    if not PYPDF_AVAILABLE:
-        return ""
+def _extract_pdf(data: bytes, max_chars: int = 12000) -> str:
+    if not PYPDF_AVAILABLE: return ""
     try:
         reader = PdfReader(io.BytesIO(data))
         parts, total = [], 0
         for page in reader.pages[:30]:
-            try:
-                t = page.extract_text() or ""
-            except Exception:  # noqa: BLE001
-                t = ""
-            parts.append(t)
-            total += len(t)
-            if total > max_chars:
-                break
+            try: t = page.extract_text() or ""
+            except Exception: t = ""
+            parts.append(t); total += len(t)
+            if total > max_chars: break
         return "\n".join(parts)[:max_chars]
-    except Exception:  # noqa: BLE001
-        return ""
+    except Exception: return ""
 
-
-def prepare_file_parts(
-    files: List[Tuple[str, str, bytes]]
-) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Return (parts_untuk_llm, catatan_untuk_ui)."""
-    parts: List[Dict[str, Any]] = []
-    notes: List[str] = []
+def prepare_file_parts(files: List[Tuple[str,str,bytes]]) -> Tuple[List[Dict], List[str]]:
+    parts, notes = [], []
     for name, mime, data in files:
         try:
-            lname = name.lower()
-            if lname.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+            ln = name.lower()
+            if ln.endswith((".png",".jpg",".jpeg",".webp",".gif")):
                 b64 = base64.b64encode(data).decode()
-                parts.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime or 'image/png'};base64,{b64}"},
-                })
+                parts.append({"type":"image_url",
+                              "image_url":{"url":f"data:{mime or 'image/png'};base64,{b64}"}})
                 notes.append(f"🖼️ {name} dilampirkan untuk model Vision.")
-            elif lname.endswith(".pdf"):
-                txt = _extract_pdf_text(data)
+            elif ln.endswith(".pdf"):
+                txt = _extract_pdf(data)
                 if txt and len(txt.strip()) > 100:
                     if len(txt) > 8000:
-                        txt = txt[:8000] + "\n[...teks PDF dipotong...]"
+                        txt = txt[:8000] + "\n[...dipotong...]"
                         notes.append(f"📄 {name}: teks PDF diekstrak & dipotong.")
                     else:
                         notes.append(f"📄 {name}: teks PDF diekstrak.")
-                    parts.append({"type": "text",
-                                  "text": f"\n\n[Isi PDF {name}]\n{txt}"})
+                    parts.append({"type":"text","text":f"\n\n[Isi PDF {name}]\n{txt}"})
                 else:
-                    notes.append(
-                        f"📄 {name}: PDF tampaknya scan tanpa lapisan teks. "
-                        f"Konversi ke PNG/JPG lalu upload agar dibaca model Vision."
-                    )
+                    notes.append(f"📄 {name}: PDF scan tanpa teks — konversi ke PNG/JPG.")
             else:
-                try:
-                    txt = data.decode("utf-8", errors="ignore")
-                except Exception:  # noqa: BLE001
-                    txt = ""
+                try: txt = data.decode("utf-8", errors="ignore")
+                except Exception: txt = ""
                 if len(txt) > 8000:
                     txt = txt[:8000] + "\n[...dipotong...]"
-                    notes.append(f"📃 {name}: file teks panjang dipotong.")
+                    notes.append(f"📃 {name}: dipotong.")
                 else:
-                    notes.append(f"📃 {name}: isi file dilampirkan.")
+                    notes.append(f"📃 {name}: dilampirkan.")
                 if txt:
-                    parts.append({"type": "text",
-                                  "text": f"\n\n[Isi file {name}]\n{txt}"})
-        except Exception as e:  # noqa: BLE001
-            notes.append(f"⚠️ Gagal memproses {name}: {str(e)[:120]}")
+                    parts.append({"type":"text","text":f"\n\n[Isi file {name}]\n{txt}"})
+        except Exception as e:
+            notes.append(f"⚠️ Gagal {name}: {str(e)[:120]}")
     return parts, notes
-
 
 # ═════════════════════════════════════════════════════════════
 # LLM CASCADE
 # ═════════════════════════════════════════════════════════════
-def _call_provider(
-    url: str,
-    api_key: str,
-    model_name: str,
-    msgs: List[Dict[str, Any]],
-    extra_headers: Optional[Dict[str, str]] = None,
-    timeout: int = LLM_TIMEOUT_PER_MODEL,
-) -> Tuple[str, str]:
-    headers = {"Authorization": f"Bearer {api_key}",
-               "Content-Type": "application/json"}
-    if extra_headers:
-        headers.update(extra_headers)
-    payload = {"model": model_name, "messages": msgs,
-               "max_tokens": 8192, "temperature": 0.7}
+def _call_provider(url: str, key: str, model: str, msgs: list,
+                   extra: Optional[Dict[str,str]] = None,
+                   timeout: int = LLM_TIMEOUT_PER_MODEL) -> Tuple[str, str]:
+    h = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    if extra: h.update(extra)
+    payload = {"model": model, "messages": msgs, "max_tokens": 8192, "temperature": 0.7}
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=timeout)
-        if r.status_code in (400, 401, 402, 403, 404, 429):
+        r = requests.post(url, json=payload, headers=h, timeout=timeout)
+        if r.status_code in (400,401,402,403,404,429):
             return "", f"HTTP {r.status_code}"
         r.raise_for_status()
-        content = r.json()["choices"][0]["message"]["content"]
-        return content or "", ""
-    except requests.exceptions.Timeout:
-        return "", "TIMEOUT"
-    except Exception as e:  # noqa: BLE001
-        return "", str(e)[:150]
+        return r.json()["choices"][0]["message"]["content"] or "", ""
+    except requests.exceptions.Timeout: return "", "TIMEOUT"
+    except Exception as e: return "", str(e)[:150]
 
-
-def call_chain(
-    messages_text: List[Dict[str, Any]],
-    messages_multimodal: Optional[List[Dict[str, Any]]] = None,
-    force_text_only: bool = False,
-) -> Tuple[str, str, str, List[str], bool]:
-    """
-    Cascade provider. Return (answer, provider, model, fail_log, switched).
-    Membatasi jumlah percobaan agar responsif.
-    """
-    hf_key, groq_key, or_key = get_api_keys()
-    primary_id = st.session_state.get("model_selected", DEFAULT_CHOICE_ID)
-    primary = CHOICE_BY_ID.get(primary_id) or CHOICE_BY_ID[DEFAULT_CHOICE_ID]
+def call_chain(text_msgs: list, mm_msgs: Optional[list] = None,
+               force_text: bool = False) -> Tuple[str, str, str, List[str], bool]:
+    hf, groq, ork = get_api_keys()
+    pid = st.session_state.get("model_selected", DEFAULT_CHOICE_ID)
+    primary = CHOICE_BY_ID.get(pid) or CHOICE_BY_ID[DEFAULT_CHOICE_ID]
     chain = [primary] + [c for c in PROVIDER_CHOICES if c["id"] != primary["id"]]
-    if force_text_only:
-        chain = [c for c in chain if c.get("type") == "text"]
-
-    fail_log: List[str] = []
-    attempts = 0
+    if force_text: chain = [c for c in chain if c.get("type") == "text"]
+    fails, attempts = [], 0
     for c in chain:
-        if attempts >= LLM_MAX_ATTEMPTS:
-            break
-        prov, mname = c["provider"], c["model"]
-        mm_ok = c.get("type") in ("vision", "multimodal")
-        msgs = (messages_multimodal
-                if (mm_ok and messages_multimodal is not None)
-                else messages_text)
+        if attempts >= LLM_MAX_ATTEMPTS: break
+        p, m = c["provider"], c["model"]
+        mm_ok = c.get("type") in ("vision","multimodal")
+        msgs = mm_msgs if (mm_ok and mm_msgs is not None) else text_msgs
         try:
-            if prov == "groq":
-                if not groq_key:
-                    fail_log.append(f"{c['label']}: no GROQ_API_KEY")
-                    continue
+            if p == "groq":
+                if not groq: fails.append(f"{c['label']}: no GROQ_API_KEY"); continue
                 attempts += 1
-                ans, err = _call_provider(API_URL_GROQ, groq_key, mname, msgs)
-            elif prov == "openrouter":
-                if not or_key:
-                    fail_log.append(f"{c['label']}: no OPENROUTER_API_KEY")
-                    continue
+                ans, err = _call_provider(API_URL_GROQ, groq, m, msgs)
+            elif p == "openrouter":
+                if not ork: fails.append(f"{c['label']}: no OPENROUTER_API_KEY"); continue
                 attempts += 1
-                ans, err = _call_provider(
-                    API_URL_OPENROUTER, or_key, mname, msgs,
-                    extra_headers={
-                        "HTTP-Referer": "https://telco-digital-ai.streamlit.app",
-                        "X-Title": "ID Telco Digital AI",
-                    },
-                )
-            else:  # hf
-                if not hf_key:
-                    fail_log.append(f"{c['label']}: no HF_TOKEN")
-                    continue
+                ans, err = _call_provider(API_URL_OPENROUTER, ork, m, msgs,
+                    extra={"HTTP-Referer":"https://telco-digital-ai.streamlit.app",
+                           "X-Title":"ID Telco Digital AI"})
+            else:
+                if not hf: fails.append(f"{c['label']}: no HF_TOKEN"); continue
                 attempts += 1
-                ans, err = _call_provider(API_URL_HF, hf_key, mname, msgs)
+                ans, err = _call_provider(API_URL_HF, hf, m, msgs)
             if ans:
-                switched = (c["id"] != primary_id)
-                return ans, prov, mname, fail_log, switched
-            fail_log.append(f"{c['label']}: {err or 'unknown'}")
-        except Exception as e:  # noqa: BLE001
-            fail_log.append(f"{c['label']}: {str(e)[:80]}")
-    return "", "", "", fail_log, False
+                return ans, p, m, fails, (c["id"] != pid)
+            fails.append(f"{c['label']}: {err or 'unknown'}")
+        except Exception as e:
+            fails.append(f"{c['label']}: {str(e)[:80]}")
+    return "", "", "", fails, False
 
-
-def llm_summarize(text: str, instruction: str) -> str:
-    """Ringkas teks via cascade. Soft-fail → ''."""
-    msgs = [
-        {"role": "system",
-         "content": ("Anda adalah peringkas dokumen teknis telekomunikasi. "
-                     "Pertahankan angka, nama proyek, organisasi, tanggal, dan URL penting.")},
-        {"role": "user", "content": instruction + "\n\n" + text[:24000]},
-    ]
-    ans, _, _, _, _ = call_chain(msgs, None, force_text_only=True)
+def llm_summarize(text: str, instr: str) -> str:
+    msgs = [{"role":"system","content":"Peringkas dokumen teknis telekomunikasi. Pertahankan angka, nama proyek, tanggal, URL."},
+            {"role":"user","content": instr + "\n\n" + text[:24000]}]
+    ans, _, _, _, _ = call_chain(msgs, None, force_text=True)
     return ans or ""
 
-
 # ═════════════════════════════════════════════════════════════
-# BUILD SEARCH CONTEXT
+# BUILD CONTEXT
 # ═════════════════════════════════════════════════════════════
-def build_search_context(
-    prompt: str,
-    prioritize: str,
-    use_web: bool,
-    use_spec: bool,
-) -> Tuple[str, List[str], List[Tuple[str, str, str]], bool, bool]:
-    """
-    Return: (context, sources_used, notes[(name,status,detail)], web_used, spec_used).
-    """
-    parts: List[str] = []
-    sources_used: List[str] = []
-    notes: List[Tuple[str, str, str]] = []
-    web_used = False
-    spec_used = False
-
+def build_search_context(prompt: str, prioritize: str, use_web: bool, use_spec: bool
+                         ) -> Tuple[str, List[str], List[Tuple[str,str,str]], bool, bool]:
+    parts, sources, notes = [], [], []
+    web_used, spec_used = False, False
     if use_spec:
         spec_used = True
-        parts.append(
-            "=== SUMBER KURASI PRIMER (PRIORITAS TINGGI) ===\n"
-            "Gunakan informasi terkini dari dashboard live berikut sebagai referensi utama "
-            "untuk topik Data Center, Fiber Optic, dan Submarine Cable di Asia Pacific / Indonesia "
-            "(periode 2-3 bulan terakhir).\n"
-        )
-        if prioritize in ("dc", "both"):
-            src = SPECIALIZED_SOURCES["dc"]
-            parts.append(f"1. **{src['name']}**\n   URL: {src['url']}\n   {src['description']}\n")
+        parts.append("=== SUMBER KURASI PRIMER (PRIORITAS TINGGI) ===\n"
+                     "Gunakan dashboard live berikut sebagai referensi utama untuk topik DC, FO, Submarine APAC.\n")
+        if prioritize in ("dc","both"):
+            s = SPECIALIZED_SOURCES["dc"]
+            parts.append(f"1. **{s['name']}**\n   URL: {s['url']}\n   {s['description']}\n")
             parts.append(KEY_FACTS_DC)
-            headlines = fetch_rss_headlines("dc")
-            if headlines:
-                parts.append("=== JUDUL BERITA TERKINI (RSS, DC) ===\n"
-                             + "\n".join(f"- {h}" for h in headlines))
-        if prioritize in ("fo", "both"):
-            src = SPECIALIZED_SOURCES["fo"]
-            parts.append(f"2. **{src['name']}**\n   URL: {src['url']}\n   {src['description']}\n")
+            h = fetch_rss_headlines("dc")
+            if h: parts.append("=== JUDUL BERITA DC ===\n" + "\n".join(f"- {x}" for x in h))
+        if prioritize in ("fo","both"):
+            s = SPECIALIZED_SOURCES["fo"]
+            parts.append(f"2. **{s['name']}**\n   URL: {s['url']}\n   {s['description']}\n")
             parts.append(KEY_FACTS_FO)
-            headlines = fetch_rss_headlines("fo")
-            if headlines:
-                parts.append("=== JUDUL BERITA TERKINI (RSS, FO) ===\n"
-                             + "\n".join(f"- {h}" for h in headlines))
-        sources_used.append("KEY FACTS + dashboard kurasi Live DC/FO ASPAC")
-
-        # Scrape dashboard (dengan status)
-        for key in (["dc", "fo"] if prioritize == "both" else [prioritize]):
-            src = SPECIALIZED_SOURCES[key]
-            text, status, detail = scrape_dashboard(src["url"])
+            h = fetch_rss_headlines("fo")
+            if h: parts.append("=== JUDUL BERITA FO ===\n" + "\n".join(f"- {x}" for x in h))
+        sources.append("KEY FACTS + dashboard kurasi Live DC/FO ASPAC")
+        for k in (["dc","fo"] if prioritize == "both" else [prioritize]):
+            s = SPECIALIZED_SOURCES[k]
+            txt, status, detail = scrape_dashboard(s["url"])
             if status == "ok":
-                parts.append(f"[Scraped dari {src['name']}]\n{text}")
-                sources_used.append(f"Scrape {src['name']}")
+                parts.append(f"[Scraped dari {s['name']}]\n{txt}")
+                sources.append(f"Scrape {s['name']}")
             else:
-                notes.append((src["name"], status, detail))
-
-        # DDG targeted
-        site_q: List[str] = []
-        if prioritize in ("dc", "both"):
-            site_q.append(f'site:narational.byethost11.com ({prompt})')
-            site_q.append('site:narational.byethost11.com (CoreWeave OR Firmus '
-                          'OR "data center" OR Batam OR Nongsa)')
-        if prioritize in ("fo", "both"):
-            site_q.append('site:narational.byethost11.com ("Nongsa-Changi" OR Echo '
-                          'OR "submarine cable" OR "kabel laut")')
-        all_res: List[Dict[str, Any]] = []
-        seen: set = set()
-        for sq in site_q:
-            res, err = ddg_fetch(sq, 3)
-            if err:
-                notes.append(("DuckDuckGo", "error", err))
+                notes.append((s["name"], status, detail))
+        sq = []
+        if prioritize in ("dc","both"):
+            sq.append(f'site:narational.byethost11.com ({prompt})')
+            sq.append('site:narational.byethost11.com (CoreWeave OR Firmus OR "data center" OR Batam)')
+        if prioritize in ("fo","both"):
+            sq.append('site:narational.byethost11.com ("Nongsa-Changi" OR Echo OR "submarine cable")')
+        all_res, seen = [], set()
+        for q in sq:
+            res, err = ddg_fetch(q, 3)
+            if err: notes.append(("DuckDuckGo","error",err))
             for r in res:
-                href = r.get("href", "")
+                href = r.get("href","")
                 if href and href not in seen:
-                    seen.add(href)
-                    all_res.append(r)
+                    seen.add(href); all_res.append(r)
         if all_res:
             lines = ["=== HASIL PENCARIAN TARGETED ==="]
             for i, r in enumerate(all_res[:6], 1):
-                tag = " [SUMBER KURASI]" if "narational" in r.get("href", "") else ""
-                lines.append(f"{i}. {r.get('title', '')}{tag}\n"
-                             f"{(r.get('body', '') or '')[:300]}...\n"
-                             f"Sumber: {r.get('href', '')}")
+                tag = " [SUMBER KURASI]" if "narational" in r.get("href","") else ""
+                lines.append(f"{i}. {r.get('title','')}{tag}\n"
+                             f"{(r.get('body','') or '')[:300]}...\n"
+                             f"Sumber: {r.get('href','')}")
             parts.append("\n".join(lines))
-            sources_used.append("DuckDuckGo site-search (kurasi)")
-
+            sources.append("DuckDuckGo site-search (kurasi)")
     if use_web:
         res, err = ddg_fetch(prompt, 4)
-        if err:
-            notes.append(("DuckDuckGo (umum)", "error", err))
+        if err: notes.append(("DuckDuckGo (umum)","error",err))
         if res:
             lines = [f"=== HASIL PENCARIAN UMUM: {prompt} ==="]
             for i, r in enumerate(res, 1):
-                lines.append(f"{i}. {r.get('title', '')}\n"
-                             f"{(r.get('body', '') or '')[:300]}...\n"
-                             f"Sumber: {r.get('href', '')}")
+                lines.append(f"{i}. {r.get('title','')}\n"
+                             f"{(r.get('body','') or '')[:300]}...\n"
+                             f"Sumber: {r.get('href','')}")
             parts.append("\n".join(lines))
-            sources_used.append("DuckDuckGo web search")
+            sources.append("DuckDuckGo web search")
             web_used = True
-
-    return "\n\n".join(parts), sources_used, notes, web_used, spec_used
-
+    return "\n\n".join(parts), sources, notes, web_used, spec_used
 
 # ═════════════════════════════════════════════════════════════
 # PDF EXPORT
 # ═════════════════════════════════════════════════════════════
-def create_pdf_from_history(
-    history: List[Dict[str, Any]],
-    title: str = "Riwayat Chat - ID Telco Digital AI",
-) -> Optional[bytes]:
-    if not FPDF_AVAILABLE:
-        return None
+def create_pdf_from_history(history: List[Dict], title: str = "Riwayat Chat") -> Optional[bytes]:
+    if not FPDF_AVAILABLE: return None
     try:
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.cell(0, 10, title, ln=True)
-        pdf.set_font("Helvetica", "", 10)
-        pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
-                       f"| App v{APP_VERSION}", ln=True)
+        pdf = FPDF(); pdf.set_auto_page_break(auto=True, margin=15); pdf.add_page()
+        pdf.set_font("Helvetica","B",16); pdf.cell(0,10,title,ln=True)
+        pdf.set_font("Helvetica","",10)
+        pdf.cell(0,8,f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | v{APP_VERSION}",ln=True)
         pdf.ln(5)
         for item in history:
             role = "User" if item.get("role") == "user" else "AI"
-            header = f"[{item.get('time', '')}] {role} ({item.get('model', '')})"
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.cell(0, 8, header, ln=True)
-            pdf.set_font("Helvetica", "", 10)
-            content = re.sub(r"[*_`#]", "", str(item.get("content", "")))[:3000]
+            pdf.set_font("Helvetica","B",11)
+            pdf.cell(0,8,f"[{item.get('time','')}] {role} ({item.get('model','')})",ln=True)
+            pdf.set_font("Helvetica","",10)
+            content = re.sub(r"[*_`#]","",str(item.get("content","")))[:3000]
             content = content.encode("latin-1", errors="replace").decode("latin-1")
-            pdf.multi_cell(0, 6, content)
-            pdf.ln(4)
+            pdf.multi_cell(0,6,content); pdf.ln(4)
         raw = pdf.output(dest="S")
-        if isinstance(raw, (bytes, bytearray)):
-            return bytes(raw)
-        if isinstance(raw, str):
-            return raw.encode("latin-1")
+        if isinstance(raw, (bytes, bytearray)): return bytes(raw)
+        if isinstance(raw, str): return raw.encode("latin-1")
         return None
-    except Exception:  # noqa: BLE001
-        return None
-
+    except Exception: return None
 
 # ═════════════════════════════════════════════════════════════
-# MERMAID
+# MERMAID — FIXED
 # ═════════════════════════════════════════════════════════════
+def _sanitize_mermaid_code(code: str) -> str:
+    """
+    Auto-quote node label jika mengandung karakter yang membuat parser gagal:
+    (), &, ,, dan karakter non-ASCII setelahnya.
+    Contoh: DC[Data Center (Batam & Bali)] → DC["Data Center (Batam & Bali)"]
+    """
+    # Match NodeID[label] atau NodeID(label) atau NodeID{label}
+    # Untuk safety, kita handle square bracket dulu
+    def _quote(match):
+        nid = match.group(1)
+        label = match.group(2).strip()
+        # Escape quotes yang ada di dalam
+        label = label.replace('"', '\\"')
+        return f'{nid}["{label}"]'
+
+    # Square brackets dengan konten mengandung special char
+    code = re.sub(
+        r'(\b[A-Za-z_][A-Za-z0-9_]*)\[([^"\]]*[()&,][^"\]]*)\]',
+        _quote, code
+    )
+    # Parentheses nodes: NodeID(label) → NodeID("label")
+    code = re.sub(
+        r'(\b[A-Za-z_][A-Za-z0-9_]*)\(([^")]*[&,][^")]*)\)',
+        lambda m: f'{m.group(1)}("{m.group(2).strip()}")', code
+    )
+    return code
+
 def extract_and_render_mermaid(text: str) -> None:
     pattern = r"```mermaid\s*([\s\S]*?)```"
     matches = re.findall(pattern, text, re.IGNORECASE)
     if not matches:
         return
-    st.markdown("#### Diagram Mermaid terdeteksi")
+    st.markdown("#### 📊 Diagram Mermaid terdeteksi")
+
+    mermaid_theme = C["mermaid_theme"]
+    bg = C["surface_alt"] if IS_DARK else "#ffffff"
+    border = C["border"]
+    text_color = C["text"]
+    error_bg = C["error_bg"]
+    error_fg = C["error"]
+
     for i, code in enumerate(matches):
         code = code.strip()
-        if len(code) > 8000:
-            st.warning(f"Diagram #{i+1} terlalu besar — tampilkan sebagai kode mentah.")
+        if not code:
+            continue
+        if len(code) > 12000:
+            st.warning(f"Diagram #{i+1} terlalu besar ({len(code):,} karakter). "
+                       f"Menampilkan sebagai kode mentah.")
             st.code(code, language="mermaid")
             continue
-        lines = code.count("\n") + 1
-        height = min(900, max(280, 40 + lines * 28))
-        safe_code = json.dumps(code)
-        mermaid_html = f"""
-        <div style="position:relative;">
-          <button onclick="
-            const el = document.getElementById('mermaid-wrap-{i}');
-            if (!document.fullscreenElement) {{ el.requestFullscreen().catch(()=>{{}}); }}
-            else {{ document.exitFullscreen(); }}
-          " style="position:absolute;top:8px;right:8px;z-index:10;padding:4px 10px;
-                   font-size:12px;cursor:pointer;border-radius:4px;border:1px solid #ccc;
-                   background:#fff;">⛶ Fullscreen</button>
-          <div id="mermaid-wrap-{i}" class="mermaid"
-               style="min-height:{height}px;background:#f8f9fa;padding:1.2rem;
-                      border-radius:8px;overflow:auto;"></div>
-        </div>
-        <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-        <script>
-        (function() {{
-          var code = {safe_code};
-          try {{
-            mermaid.initialize({{ startOnLoad: false, theme: 'default',
-                                 securityLevel: 'strict' }});
-            mermaid.render('mermaid-svg-{i}', code).then(function(res) {{
-              document.getElementById('mermaid-wrap-{i}').innerHTML = res.svg;
-            }}).catch(function(err) {{
-              document.getElementById('mermaid-wrap-{i}').innerHTML =
-                '<pre style="white-space:pre-wrap;color:#333;">' +
-                code.replace(/[<>&]/g, function(c) {{
-                  return {{'<':'&lt;','>':'&gt;','&':'&amp;'}}[c];
-                }}) + '</pre><p style="color:#c00;font-size:0.85rem;">' +
-                '(Render Mermaid gagal — menampilkan kode mentah)</p>';
+
+        # === FIX 1: Auto-quote label ===
+        sanitized = _sanitize_mermaid_code(code)
+        safe_code = json.dumps(sanitized)
+
+        # Estimate height
+        lines = sanitized.count("\n") + 1
+        height = min(900, max(320, 80 + lines * 22))
+
+        # === FIX 2: Adaptive background + wait for mermaid ===
+        mermaid_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    html, body {{
+        margin:0; padding:0; background:transparent;
+        color:{text_color};
+        font-family:-apple-system,system-ui,sans-serif;
+    }}
+    #wrap {{
+        position:relative;
+        background:{bg};
+        border:1px solid {border};
+        border-radius:8px;
+        padding:1rem;
+        min-height:{height}px;
+        overflow:auto;
+        color:{text_color};
+    }}
+    #target svg {{ max-width:100%; height:auto; }}
+    .fs-btn {{
+        position:absolute; top:8px; right:8px; z-index:10;
+        padding:4px 10px; font-size:12px; cursor:pointer;
+        border-radius:4px;
+        border:1px solid {border};
+        background:{bg};
+        color:{text_color};
+        font-family:inherit;
+    }}
+    .fs-btn:hover {{ opacity:0.8; }}
+    .code-fallback {{
+        background:{error_bg};
+        border:1px solid {border};
+        border-left:4px solid {error_fg};
+        border-radius:6px;
+        padding:0.8rem;
+        color:{text_color};
+        font-family:'Consolas','Courier New',monospace;
+        font-size:0.85rem;
+        white-space:pre-wrap;
+        word-break:break-word;
+        margin:0;
+    }}
+    .err-msg {{
+        color:{error_fg};
+        font-size:0.85rem;
+        font-weight:600;
+        margin-top:0.6rem;
+    }}
+    .loading {{
+        color:{text_color}; opacity:0.6; font-size:0.9rem;
+    }}
+</style>
+</head>
+<body>
+<div id="wrap">
+    <button class="fs-btn" onclick="toggleFs()">⛶ Fullscreen</button>
+    <div id="target"><div class="loading">⏳ Memuat diagram...</div></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+(function() {{
+    const code = {safe_code};
+    const targetId = 'target';
+
+    function escapeHtml(s) {{
+        return String(s).replace(/[&<>"']/g, c => ({{
+            '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+        }})[c]);
+    }}
+
+    function showError(msg) {{
+        document.getElementById(targetId).innerHTML =
+            '<pre class="code-fallback">' + escapeHtml(code) + '</pre>' +
+            '<p class="err-msg">⚠️ Render gagal: ' + escapeHtml(msg || 'unknown') + '</p>';
+    }}
+
+    // === FIX 3: Tunggu Mermaid CDN siap sebelum render ===
+    function waitAndRender() {{
+        if (typeof mermaid === 'undefined') {{
+            return setTimeout(waitAndRender, 80);
+        }}
+        try {{
+            mermaid.initialize({{
+                startOnLoad: false,
+                theme: '{mermaid_theme}',
+                securityLevel: 'loose',
+                fontFamily: 'inherit',
             }});
-          }} catch (e) {{
-            document.getElementById('mermaid-wrap-{i}').innerHTML =
-              '<pre style="white-space:pre-wrap;color:#333;">' + code + '</pre>';
-          }}
-        }})();
-        </script>
-        """
-        st.components.v1.html(mermaid_html, height=height + 60, scrolling=True)
+        }} catch (e) {{
+            return showError('init: ' + (e.message || e));
+        }}
+        const rid = 'svg-' + Date.now() + '-' + Math.floor(Math.random()*1000);
+        try {{
+            const result = mermaid.render(rid, code);
+            if (result && typeof result.then === 'function') {{
+                result.then(r => {{
+                    document.getElementById(targetId).innerHTML = r.svg || r;
+                }}).catch(e => showError(e && e.message ? e.message : String(e)));
+            }} else if (typeof result === 'string') {{
+                document.getElementById(targetId).innerHTML = result;
+            }} else {{
+                showError('Unexpected render result');
+            }}
+        }} catch (e) {{
+            showError(e.message || String(e));
+        }}
+    }}
+
+    window.toggleFs = function() {{
+        const el = document.getElementById('wrap');
+        if (!document.fullscreenElement) {{
+            el.requestFullscreen().catch(() => {{}});
+        }} else {{
+            document.exitFullscreen();
+        }}
+    }};
+
+    waitAndRender();
+}})();
+</script>
+</body>
+</html>"""
+        st.components.v1.html(mermaid_html, height=height + 80, scrolling=True)
+
+        # Fallback expander — pakai st.code (sudah adaptive oleh Streamlit)
         with st.expander(f"Lihat kode Mermaid #{i+1}"):
-            st.code(code, language="mermaid")
-
+            st.code(sanitized, language="mermaid")
+            if sanitized != code:
+                st.caption("ℹ️ Kode di atas sudah di-auto-quote agar valid Mermaid.")
+                with st.expander("Kode asli dari AI"):
+                    st.code(code, language="mermaid")
 
 # ═════════════════════════════════════════════════════════════
-# RENDER NOTES
+# RENDER NOTES — adaptive
 # ═════════════════════════════════════════════════════════════
-SCRAPE_EXPLAIN = {
-    "blocked": ("🛡️ {name} dilindungi anti-bot (HTTP {detail}). "
-                "Fallback aktif: DDG site-search + KEY FACTS — jawaban tetap akurat."),
-    "js_required": ("🧩 {name} butuh JavaScript. Fallback: DDG site-search + KEY FACTS."),
-    "empty": ("📭 {name} mengembalikan konten kosong dari server cloud. "
-              "Fallback: DDG + KEY FACTS."),
-    "error": ("⚠️ {name} gagal diakses ({detail}). Fallback: DDG + KEY FACTS."),
-    "library_missing": ("📦 beautifulsoup4 tidak terinstall — scraping dilewati."),
+SCRAPE_MSG = {
+    "blocked": ("🛡️ <strong>{name}</strong> dilindungi anti-bot (HTTP {detail}). "
+                "Fallback aktif: DDG site-search + KEY FACTS."),
+    "js_required": "🧩 <strong>{name}</strong> butuh JavaScript. Fallback: DDG + KEY FACTS.",
+    "empty": "📭 <strong>{name}</strong> kosong saat diakses dari cloud. Fallback: DDG + KEY FACTS.",
+    "error": "⚠️ <strong>{name}</strong> gagal ({detail}). Fallback: DDG + KEY FACTS.",
+    "library_missing": "📦 beautifulsoup4 tidak terinstall — scraping dilewati.",
 }
 
-
-def render_context_notes(notes: List[Tuple[str, str, str]]) -> None:
+def render_context_notes(notes: List[Tuple[str,str,str]]) -> None:
     for name, status, detail in notes:
-        if status == "ok":
-            continue
-        tpl = SCRAPE_EXPLAIN.get(status)
-        if tpl:
-            st.markdown(
-                f'<div class="context-warning">{tpl.format(name=name, detail=detail)}</div>',
-                unsafe_allow_html=True,
-            )
+        if status == "ok": continue
+        msg = SCRAPE_MSG.get(status)
+        if msg:
+            st.markdown(f'<div class="context-warning">{msg.format(name=name, detail=detail)}</div>',
+                        unsafe_allow_html=True)
         else:
             st.caption(f"ℹ️ {name}: {status} — {detail}")
 
-
 # ═════════════════════════════════════════════════════════════
-# ADMIN ANALYTICS
+# ADMIN
 # ═════════════════════════════════════════════════════════════
-def _admin_password_ok(pwd: str) -> bool:
-    """Bandingkan hash SHA-256. Password diambil dari secrets."""
-    expected_hash = _get_secret("ADMIN_PASSWORD_HASH")
-    if not expected_hash:
-        return False
-    if len(expected_hash) != 64:
-        return False
-    try:
-        return hashlib.sha256(pwd.encode()).hexdigest() == expected_hash.lower()
-    except Exception:  # noqa: BLE001
-        return False
+def _admin_ok(pwd: str) -> bool:
+    exp = _get_secret("ADMIN_PASSWORD_HASH")
+    if not exp or len(exp) != 64: return False
+    try: return hashlib.sha256(pwd.encode()).hexdigest() == exp.lower()
+    except Exception: return False
 
-
-def render_admin_dashboard() -> None:
-    st.header("🔐 Admin Analytics Dashboard")
-
+def render_admin_analytics() -> None:
     if not _get_secret("ADMIN_PASSWORD_HASH"):
-        st.error("ADMIN_PASSWORD_HASH belum diset di Streamlit Secrets. "
-                 "Panel owner dinonaktifkan.")
-        st.caption("Tambahkan ke secrets: `ADMIN_PASSWORD_HASH = \"<sha256hex>\"`")
+        st.info("🔐 ADMIN_PASSWORD_HASH belum diset di Secrets. Panel dinonaktifkan.")
+        st.caption('Tambahkan: `ADMIN_PASSWORD_HASH = "<sha256 hex>"`')
+        st.caption("Generate: `echo -n 'password_anda' | sha256sum`")
         return
-
     if not st.session_state.get("is_admin"):
         pwd = st.text_input("Password Admin", type="password", key="admin_pwd")
-        if st.button("Login"):
-            if _admin_password_ok(pwd):
-                st.session_state["is_admin"] = True
-                st.rerun()
-            else:
-                st.error("Password salah.")
+        if st.button("🔓 Login", use_container_width=False):
+            if _admin_ok(pwd):
+                st.session_state["is_admin"] = True; st.rerun()
+            else: st.error("Password salah.")
         return
-
     st.success("Login berhasil.")
-    if st.button("Logout"):
-        st.session_state["is_admin"] = False
-        st.rerun()
-
+    if st.button("🚪 Logout"):
+        st.session_state["is_admin"] = False; st.rerun()
     if not PANDAS_AVAILABLE:
-        st.warning(f"pandas tidak tersedia: {PANDAS_ERROR}")
-        return
-
+        st.warning(f"pandas tidak tersedia: {PANDAS_ERROR}"); return
     client = get_supabase_client(admin=True)
     if client is None:
-        st.warning("Supabase (admin) tidak terkonfigurasi. "
-                   "Set SUPABASE_SERVICE_KEY untuk SELECT analytics.")
-        return
-
+        st.warning("Supabase admin tidak terkonfigurasi (set SUPABASE_SERVICE_KEY)."); return
     try:
         resp = (client.table(get_supabase_table_name())
-                .select("*").order("timestamp_utc", desc=True)
-                .limit(1000).execute())
+                .select("*").order("timestamp_utc", desc=True).limit(1000).execute())
         rows = resp.data or []
-        if not rows:
-            st.info("Tabel log masih kosong.")
-            return
-
+        if not rows: st.info("Tabel log masih kosong."); return
         df = pd.DataFrame(rows)
         if "timestamp_utc" in df.columns:
             df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], errors="coerce")
-
-        q_success = df[df.get("feature") == "querysuccess"] if "feature" in df else df
-        fb = df[df.get("feature") == "feedback"] if "feature" in df else pd.DataFrame()
-        fb_up = int((fb.get("feedback", pd.Series(dtype=str)) == "positive").sum())
-        fb_down = int((fb.get("feedback", pd.Series(dtype=str)) == "negative").sum())
-
-        c1, c2, c3, c4, c5 = st.columns(5)
+        qs = df[df["feature"] == "querysuccess"] if "feature" in df else df
+        fb = df[df["feature"] == "feedback"] if "feature" in df else pd.DataFrame()
+        fbu = int((fb.get("feedback", pd.Series(dtype=str)) == "positive").sum())
+        fbd = int((fb.get("feedback", pd.Series(dtype=str)) == "negative").sum())
+        c1,c2,c3,c4,c5 = st.columns(5)
         c1.metric("Total baris", f"{len(df):,}")
-        c2.metric("Query sukses", f"{len(q_success):,}")
+        c2.metric("Query sukses", f"{len(qs):,}")
         c3.metric("Sesi unik", f"{df['session_id'].nunique():,}" if "session_id" in df else "-")
-        c4.metric("Feedback 👍 / 👎", f"{fb_up} / {fb_down}")
-        ratio = (fb_up / max(1, fb_up + fb_down)) * 100
-        c5.metric("Rating positif", f"{ratio:.0f}%")
-
+        c4.metric("👍 / 👎", f"{fbu} / {fbd}")
+        c5.metric("Rating positif", f"{(fbu/max(1,fbu+fbd)*100):.0f}%")
         col1, col2 = st.columns(2)
         with col1:
-            if "timestamp_utc" in q_success.columns and not q_success.empty:
-                st.markdown("**Tren harian (query sukses)**")
-                daily = q_success.set_index("timestamp_utc").resample("D").size()
-                st.line_chart(daily)
+            if "timestamp_utc" in qs.columns and not qs.empty:
+                st.markdown("**Tren harian**")
+                st.line_chart(qs.set_index("timestamp_utc").resample("D").size())
             if "country" in df.columns:
                 st.markdown("**Top negara**")
                 st.bar_chart(df["country"].value_counts().head(8))
         with col2:
-            if "model" in q_success.columns:
+            if "model" in qs.columns:
                 st.markdown("**Top model**")
-                st.bar_chart(q_success["model"].value_counts().head(8))
+                st.bar_chart(qs["model"].value_counts().head(8))
             if "feature" in df.columns:
                 st.markdown("**Distribusi fitur**")
                 st.bar_chart(df["feature"].value_counts().head(10))
-
         st.markdown("**50 log terbaru**")
-        show_cols = [c for c in ["timestamp_utc", "feature", "country", "model",
-                                 "prompt_snippet", "error_note"]
-                     if c in df.columns]
-        st.dataframe(df[show_cols].head(50), use_container_width=True)
-
-    except Exception as e:  # noqa: BLE001
-        st.error(f"Gagal query analytics: {str(e)[:250]}")
-
+        cols = [c for c in ["timestamp_utc","feature","country","model",
+                            "prompt_snippet","error_note"] if c in df.columns]
+        st.dataframe(df[cols].head(50), use_container_width=True)
+    except Exception as e:
+        st.error(f"Gagal query: {str(e)[:250]}")
 
 # ═════════════════════════════════════════════════════════════
-# SESSION STATE INIT
+# SESSION STATE
 # ═════════════════════════════════════════════════════════════
-_DEFAULTS: Dict[str, Any] = {
-    "prompt_history": "",
-    "model_selected": DEFAULT_CHOICE_ID,
-    "chat_history": [],
-    "enable_web_search": True,
-    "enable_specialized_apac": True,
-    "enable_rag": True,
-    "debug_mode": False,
-    "prioritize_dashboard": "both",
-    "force_refresh_context": False,
-    "answer_lang": "id",
-    "last_log_status": "",
-    "pending_query": None,      # {prompt, raw_context, files, sources, web_used, spec_used, notes}
-    "is_admin": False,
-    "_rate_ts": deque(),
+_DEFAULTS = {
+    "prompt_history": "", "model_selected": DEFAULT_CHOICE_ID,
+    "chat_history": [], "enable_web_search": True,
+    "enable_specialized_apac": True, "enable_rag": True,
+    "debug_mode": False, "prioritize_dashboard": "both",
+    "force_refresh_context": False, "answer_lang": "id",
+    "last_log_status": "", "pending_query": None,
+    "is_admin": False, "_rate_ts": deque(), "nav_section": "💬 Chat",
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
-
 generate_session_id()
 
-
-# ═════════════════════════════════════════════════════════════
-# DEEP LINKING
-# ═════════════════════════════════════════════════════════════
-_q = st.query_params
-if _q.get("prompt"):
-    st.session_state["prompt_history"] = _q["prompt"]
-if _q.get("model"):
-    mid = _q["model"]
-    if mid in CHOICE_BY_ID:
-        st.session_state["model_selected"] = mid
+# ── DEEP LINKING ─────────────────────────────────────────────
+q = st.query_params
+if q.get("prompt"): st.session_state["prompt_history"] = q["prompt"]
+if q.get("model"):
+    mid = q["model"]
+    if mid in CHOICE_BY_ID: st.session_state["model_selected"] = mid
     else:
         for c in PROVIDER_CHOICES:
             if c["model"] == mid or c["id"].endswith(mid):
-                st.session_state["model_selected"] = c["id"]
-                break
-
-# Admin routing
-if _q.get("admin") == "1":
-    render_admin_dashboard()
-    st.stop()
-
+                st.session_state["model_selected"] = c["id"]; break
+if q.get("admin") == "1": st.session_state["nav_section"] = "📊 Logs & Analytics"
 
 # ═════════════════════════════════════════════════════════════
 # HEADER
 # ═════════════════════════════════════════════════════════════
-st.markdown(
-    f"""
+st.markdown(f"""
 <div class="logo-header">
   <img src="{LOGO_DATA_URI}" alt="Logo">
   <div>
     <div class="app-title">ID Telco Digital AI Assistant</div>
     <div class="app-caption" style="margin-bottom:0">
-      Gen-AI Literature Analytics by nap@iicf.or.id • v{APP_VERSION}
+      Gen-AI Literature Analytics by nap@iicf.or.id • v{APP_VERSION} · Theme: {_detect_theme()}
     </div>
   </div>
 </div>
-""",
-    unsafe_allow_html=True,
-)
-st.markdown(
-    """
-<div class="app-caption">
-AI assistant untuk analisis Telco, ICT, Digital Transformation, Fiber Optic, 5G,
-Satellite, Data Center, Regulation, Project &amp; Risk Management.
-Dilengkapi sumber kurasi live DC &amp; FO/Subsea Asia Pacific, Simple RAG, dan Context Guard.
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
+""", unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════
-# SIDEBAR
+# EXECUTE QUERY
 # ═════════════════════════════════════════════════════════════
-with st.sidebar:
-    st.header("⚙️ Pengaturan")
-
-    # Bahasa
-    lang_keys = list(LANG_OPTIONS.keys())
-    lang_labels = list(LANG_OPTIONS.values())
-    cur_lang = st.session_state.get("answer_lang", "id")
-    idx = lang_keys.index(cur_lang) if cur_lang in lang_keys else 0
-    chosen_label = st.radio("🌐 Bahasa jawaban AI", lang_labels, index=idx)
-    st.session_state["answer_lang"] = lang_keys[lang_labels.index(chosen_label)]
-
-    st.session_state["enable_web_search"] = st.checkbox(
-        "Aktifkan Web Search Umum (DuckDuckGo)",
-        value=st.session_state["enable_web_search"])
-    st.session_state["enable_specialized_apac"] = st.checkbox(
-        "⭐ Aktifkan Sumber Kurasi Live DC & FO/Subsea APAC",
-        value=st.session_state["enable_specialized_apac"])
-
-    if st.session_state["enable_specialized_apac"]:
-        st.session_state["prioritize_dashboard"] = st.selectbox(
-            "Prioritaskan dashboard",
-            options=["both", "dc", "fo"],
-            format_func=lambda x: {"both": "DC + FO/Subsea",
-                                   "dc": "Hanya Data Center",
-                                   "fo": "Hanya Fiber/Subsea"}[x],
-            index=["both", "dc", "fo"].index(
-                st.session_state.get("prioritize_dashboard", "both")),
-        )
-        st.session_state["enable_rag"] = st.checkbox(
-            "🧠 Simple RAG (hemat token)",
-            value=st.session_state["enable_rag"],
-            help=f"TF-IDF jika sklearn tersedia, else keyword-overlap. "
-                 f"Top {RAG_TOP_K} paragraf paling relevan.")
-
-    st.session_state["force_refresh_context"] = st.checkbox(
-        "Force refresh (abaikan cache)",
-        value=st.session_state["force_refresh_context"])
-
-    st.session_state["debug_mode"] = st.checkbox(
-        "Debug mode",
-        value=st.session_state["debug_mode"])
-
-    st.markdown("---")
-    st.markdown("#### Status Dependencies")
-    st.markdown(f"- duckduckgo-search: {'✅' if DDG_AVAILABLE else '❌ ' + DDG_ERROR}")
-    st.markdown(f"- beautifulsoup4: {'✅' if BS4_AVAILABLE else '❌ ' + BS4_ERROR}")
-    st.markdown(f"- supabase: {'✅' if SUPABASE_AVAILABLE else '❌ ' + SUPABASE_ERROR}")
-    st.markdown(f"- fpdf2: {'✅' if FPDF_AVAILABLE else '❌ ' + FPDF_ERROR}")
-    st.markdown(f"- pypdf: {'✅' if PYPDF_AVAILABLE else '⚠️ ' + PYPDF_ERROR}")
-    st.markdown(f"- pandas: {'✅' if PANDAS_AVAILABLE else '⚠️ ' + PANDAS_ERROR}")
-    st.markdown(f"- scikit-learn: {'✅ TF-IDF' if SKLEARN_AVAILABLE else '⚠️ keyword-overlap'}")
-
-    st.markdown("---")
-    has_hf, has_groq, has_or = get_api_keys()
-    st.markdown(
-        f"**Secrets:**  \n"
-        f"- HF_TOKEN: {'✅' if has_hf else '❌'}  \n"
-        f"- GROQ_API_KEY: {'✅' if has_groq else '❌'}  \n"
-        f"- OPENROUTER_API_KEY: {'✅' if has_or else '❌'}  \n"
-        f"- ADMIN_PASSWORD_HASH: {'✅' if _get_secret('ADMIN_PASSWORD_HASH') else '❌'}  \n"
-        f"- Supabase: **{'Aktif' if get_supabase_client() else 'Belum dikonfigurasi'}**  \n"
-        f"- Session: `{st.session_state.get('session_id', '-')}`"
-    )
-    if st.session_state.get("last_log_status"):
-        st.caption(f"Last log: {st.session_state['last_log_status']}")
-
-    if st.button("🧪 Test Tulis Log", use_container_width=True):
-        ok, msg = log_access(feature="test_log", prompt="manual test")
-        st.session_state["last_log_status"] = f"{'✅' if ok else '❌'} {msg}"
-        st.info(msg)
-
-    if st.button("🔎 Cek ketersediaan model terpilih", use_container_width=True):
-        c = CHOICE_BY_ID.get(st.session_state["model_selected"],
-                             CHOICE_BY_ID[DEFAULT_CHOICE_ID])
-        key_map = {"groq": has_groq, "openrouter": has_or, "hf": has_hf}
-        api_key = {"groq": _get_secret("GROQ_API_KEY", "groq_api_key"),
-                   "openrouter": _get_secret("OPENROUTER_API_KEY"),
-                   "hf": _get_secret("HF_TOKEN")}[c["provider"]]
-        avail, note = check_model_availability(c["provider"], c["model"], api_key or "")
-        if avail:
-            st.success(f"✅ {c['label']} — {note}")
-        else:
-            st.warning(f"⚠️ {c['label']} — {note} (cascade akan fallback)")
-
-    if not has_groq:
-        st.warning("GROQ_API_KEY tidak terbaca di secrets.")
-
-
-# ═════════════════════════════════════════════════════════════
-# MODEL SELECT
-# ═════════════════════════════════════════════════════════════
-choice_ids = [c["id"] for c in PROVIDER_CHOICES]
-cur_id = st.session_state.get("model_selected", DEFAULT_CHOICE_ID)
-if cur_id not in choice_ids:
-    cur_id = DEFAULT_CHOICE_ID
-try:
-    model_idx = choice_ids.index(cur_id)
-except Exception:  # noqa: BLE001
-    model_idx = 0
-
-selected_id = st.selectbox(
-    "Pilih Provider · Model AI",
-    options=choice_ids,
-    index=model_idx,
-    format_func=lambda i: f"{CHOICE_BY_ID[i]['label']} — {CHOICE_BY_ID[i]['desc']}",
-    help="Cascade otomatis jika model gagal.",
-)
-st.session_state["model_selected"] = selected_id
-choice = CHOICE_BY_ID[selected_id]
-model = choice["model"]
-cap = {"type": choice["type"],
-       "max_files": choice.get("max_files", 0),
-       "accept": choice.get("accept", [])}
-
-st.caption(
-    f"Provider: `{choice['provider']}` · Model: `{choice['model']}` · "
-    f"Tipe: {cap['type']}"
-    + (f" · Max {cap['max_files']} file" if cap["max_files"] else "")
-)
-
-
-# ═════════════════════════════════════════════════════════════
-# UPLOAD
-# ═════════════════════════════════════════════════════════════
-uploaded_files: List[Any] = []
-if cap["type"] in ("vision", "multimodal") or cap["accept"]:
-    accept_types = cap["accept"] or ["png", "jpg", "jpeg", "webp", "gif", "pdf", "txt", "md"]
-    uploaded_files = st.file_uploader(
-        "📎 Upload file pendukung (opsional)",
-        type=accept_types,
-        accept_multiple_files=True,
-        help=f"Maksimal {max(cap.get('max_files', 0), 3)} file",
-    )
-    max_f = max(cap.get("max_files", 0), 3)
-    if uploaded_files and len(uploaded_files) > max_f:
-        uploaded_files = uploaded_files[:max_f]
-        st.warning(f"Hanya {max_f} file pertama yang digunakan.")
-
-
-# ═════════════════════════════════════════════════════════════
-# PROMPT
-# ═════════════════════════════════════════════════════════════
-prompt = st.text_area(
-    "Masukkan Pertanyaan Anda",
-    value=st.session_state.get("prompt_history", ""),
-    height=150,
-    placeholder=(
-        "Contoh:\n"
-        "Apa tren terbaru Data Center di Asia Pacific 2026?\n"
-        "Buatkan diagram Mermaid arsitektur 5G Core.\n"
-        "Update proyek kabel laut Indonesia (Nongsa-Changi, Echo)?"
-    ),
-    key="prompt_input",
-)
-
-
-# ═════════════════════════════════════════════════════════════
-# EXECUTE QUERY — dipanggil sekali, dari tombol utama atau review UI
-# ═════════════════════════════════════════════════════════════
-def _execute_query(
-    prompt_text: str,
-    files_payload: List[Tuple[str, str, bytes]],
-    search_context: str,
-    sources_used: List[str],
-    web_used: bool,
-    spec_used: bool,
-) -> None:
-    """Jalankan query ke LLM dan tampilkan hasilnya."""
+def _execute_query(prompt_text, files_payload, search_context, sources_used,
+                   web_used, spec_used) -> None:
     lang_key = st.session_state.get("answer_lang", "id")
     lang_rule = LANG_INSTRUCTIONS.get(lang_key, LANG_INSTRUCTIONS["id"])
-
-    system_prompt = f"""Anda adalah Telco Digital AI, asisten profesional di bidang
-Telecommunications, ICT, Digital Transformation, Data Center, Fiber Optic,
-Submarine Cable, 5G, Satellite, Regulation, Project & Risk Management.
+    sys_prompt = f"""Anda adalah Telco Digital AI, asisten profesional di bidang Telecommunications, ICT,
+Data Center, Fiber Optic, Submarine Cable, 5G, Satellite, Regulation.
 
 ATURAN WAJIB:
 1. {lang_rule}
-2. PRIORITASKAN informasi dari sumber kurasi live berikut jika relevan:
-   - Live Data Center Asia Pacific: {SPECIALIZED_SOURCES['dc']['url']}
-   - Live Fiber Optic & Submarine Cable Asia Pacific: {SPECIALIZED_SOURCES['fo']['url']}
-3. Jika ada konteks pencarian, gunakan dan sebutkan sumbernya.
+2. PRIORITASKAN sumber kurasi live:
+   - Live Data Center APAC: {SPECIALIZED_SOURCES['dc']['url']}
+   - Live Fiber & Submarine APAC: {SPECIALIZED_SOURCES['fo']['url']}
+3. Sebutkan sumber jika memakai konteks.
 4. Jika diminta diagram, hasilkan kode Mermaid valid dalam blok ```mermaid.
-5. Bedakan dengan jelas: fakta (dari sumber), analisis, dan rekomendasi.
-6. Jika data tidak lengkap, sampaikan transparan tanpa mengarang fakta."""
+5. Bedakan fakta, analisis, dan rekomendasi."""
 
     file_parts, file_notes = prepare_file_parts(files_payload)
-    for fn in file_notes:
-        st.caption(fn)
+    for fn in file_notes: st.caption(fn)
 
     final_prompt = prompt_text.strip()
     if search_context:
-        final_prompt = (
-            "Berikut konteks pencarian yang relevan (prioritas sumber kurasi live APAC):\n\n"
-            f"{search_context}\n\n"
-            f"Pertanyaan pengguna:\n{prompt_text.strip()}\n\n"
-            "Jawab berdasarkan informasi di atas + pengetahuan Anda. "
-            "Prioritaskan dan sebutkan sumber dari dashboard Live DC / Live FO-Subsea "
-            "jika relevan. Bedakan fakta, analisis, dan rekomendasi."
-        )
-
-    messages_text = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": final_prompt},
-    ]
-    messages_multimodal = None
+        final_prompt = (f"Konteks pencarian:\n\n{search_context}\n\n"
+                        f"Pertanyaan:\n{prompt_text.strip()}\n\n"
+                        f"Jawab berdasarkan konteks + pengetahuan. Sebutkan sumber dashboard bila relevan.")
+    msg_text = [{"role":"system","content":sys_prompt},
+                {"role":"user","content":final_prompt}]
+    msg_mm = None
     if file_parts:
-        messages_multimodal = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",
-             "content": [{"type": "text", "text": final_prompt}] + file_parts},
-        ]
+        msg_mm = [{"role":"system","content":sys_prompt},
+                  {"role":"user","content":[{"type":"text","text":final_prompt}] + file_parts}]
 
     with st.spinner("🤖 AI sedang memproses..."):
-        answer, used_provider, used_model, fail_log, switched = call_chain(
-            messages_text, messages_multimodal)
+        answer, prov, mdl, fails, switched = call_chain(msg_text, msg_mm)
 
     if not answer:
         st.error("❌ Semua provider/model gagal. Ringkasan:")
-        for line in fail_log[:12]:
-            st.text(f"  • {line}")
-        log_access(feature="error", prompt=prompt_text.strip(),
-                   model=model, error_note="; ".join(fail_log)[:300])
+        for line in fails[:12]: st.text(f"  • {line}")
+        log_access(feature="error", prompt=prompt_text, model="",
+                   error_note="; ".join(fails)[:300])
         return
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        ip, country = safe_get_ip_and_country()
-    except Exception:  # noqa: BLE001
-        ip, country = "unknown", "unknown"
-    try:
-        origin = get_external_referrer()
-    except Exception:  # noqa: BLE001
-        origin = ""
-
-    display_model = f"{used_model} via {used_provider}"
+    try: ip, country = safe_get_ip_and_country()
+    except Exception: ip, country = "unknown", "unknown"
+    try: origin = get_external_referrer()
+    except Exception: origin = ""
+    display_model = f"{mdl} via {prov}"
 
     st.session_state["chat_history"].append({
-        "role": "user", "content": prompt_text.strip(),
-        "model": display_model, "time": now,
-        "ip": ip, "country": country, "origin_url": origin,
-    })
+        "role":"user","content":prompt_text.strip(),"model":display_model,
+        "time":now,"ip":ip,"country":country,"origin_url":origin})
     st.session_state["chat_history"].append({
-        "role": "assistant", "content": answer,
-        "model": display_model, "time": now,
-        "ip": ip, "country": country, "origin_url": origin,
-        "user_prompt": prompt_text.strip(),
-        "feedback": None,
-        "sources": list(sources_used),
-    })
+        "role":"assistant","content":answer,"model":display_model,
+        "time":now,"ip":ip,"country":country,"origin_url":origin,
+        "user_prompt":prompt_text.strip(),"feedback":None,
+        "sources":list(sources_used)})
 
     st.markdown("### ✅ Jawaban AI")
     if switched:
-        st.caption(f"↪️ Auto-switch ke **{used_model}** via {used_provider}.")
+        st.caption(f"↪️ Auto-switch ke **{mdl}** via {prov}.")
     else:
-        st.caption(f"Provider: **{used_provider}** · Model: `{used_model}`")
-
-    # Render markdown normal — Streamlit menangani formatting dengan benar
+        st.caption(f"Provider: **{prov}** · Model: `{mdl}`")
     with st.container(border=True):
         st.markdown(answer)
 
@@ -1645,265 +1226,414 @@ ATURAN WAJIB:
         st.markdown(
             f'<div class="source-summary"><strong>📚 Sumber yang digunakan:</strong> '
             f'{html.escape(" · ".join(uniq))}</div>',
-            unsafe_allow_html=True,
-        )
+            unsafe_allow_html=True)
 
-    try:
-        extract_and_render_mermaid(answer)
-    except Exception:  # noqa: BLE001
-        pass
+    try: extract_and_render_mermaid(answer)
+    except Exception: pass
 
     if search_context and st.session_state.get("debug_mode"):
-        with st.expander("🔍 Lihat konteks pencarian (debug)"):
+        with st.expander("🔍 Konteks pencarian (debug)"):
             st.markdown(search_context)
-            st.caption(f"📏 {len(search_context):,} karakter "
-                       f"(±{estimate_tokens(search_context):,} token)")
+            st.caption(f"📏 {len(search_context):,} karakter (±{estimate_tokens(search_context):,} token)")
 
     st.session_state["prompt_history"] = prompt_text
     try:
         st.query_params["prompt"] = prompt_text[:500]
-        st.query_params["model"] = model
-    except Exception:  # noqa: BLE001
-        pass
+        st.query_params["model"] = mdl
+    except Exception: pass
+    ok, msg = log_access(feature="query_success", prompt=prompt_text, answer=answer,
+                         model=display_model, files_count=len(files_payload),
+                         web_search=web_used, specialized=spec_used)
+    st.session_state["last_log_status"] = f"{'✅' if ok else '❌'} {msg}"
 
-    ok_log, msg_log = log_access(
-        feature="query_success",
-        prompt=prompt_text.strip(), answer=answer,
-        model=display_model, files_count=len(files_payload),
-        web_search=web_used, specialized=spec_used,
+# ═════════════════════════════════════════════════════════════
+# SIDEBAR
+# ═════════════════════════════════════════════════════════════
+with st.sidebar:
+    st.markdown("### 🧭 Navigasi")
+    nav = st.radio(
+        "Pilih bagian",
+        ["💬 Chat", "🔍 Search & RAG", "📊 Logs & Analytics", "ℹ️ Diagnostics"],
+        key="nav_section", label_visibility="collapsed",
     )
-    st.session_state["last_log_status"] = f"{'✅' if ok_log else '❌'} {msg_log}"
-
-
-# ═════════════════════════════════════════════════════════════
-# TOMBOL UTAMA — build pending query
-# ═════════════════════════════════════════════════════════════
-if st.button("🚀 Tanya AI", type="primary", use_container_width=True):
-    if not prompt.strip():
-        st.warning("⚠️ Mohon isi pertanyaan terlebih dahulu.")
-        st.stop()
-
-    allowed, msg = _rate_limit_check()
-    if not allowed:
-        st.error(f"🚦 {msg}")
-        st.stop()
-
-    log_access(feature="query_start", prompt=prompt.strip(), model=model,
-               files_count=len(uploaded_files or []),
-               web_search=st.session_state["enable_web_search"],
-               specialized=st.session_state["enable_specialized_apac"])
-
-    # Baca file bytes
-    files_payload: List[Tuple[str, str, bytes]] = []
-    for f in (uploaded_files or []):
-        try:
-            files_payload.append((f.name, f.type or "application/octet-stream",
-                                  f.getvalue()))
-        except Exception:  # noqa: BLE001
-            try:
-                files_payload.append((f.name, f.type or "application/octet-stream",
-                                      f.read()))
-            except Exception:  # noqa: BLE001
-                pass
-
-    with st.spinner("⭐ Menyusun konteks (kurasi APAC + Simple RAG + web)..."):
-        if st.session_state.get("force_refresh_context"):
-            try:
-                ddg_fetch.clear()
-                scrape_dashboard.clear()
-                fetch_rss_headlines.clear()
-            except Exception:  # noqa: BLE001
-                pass
-
-        raw_context, sources_used, notes, web_used, spec_used = build_search_context(
-            prompt=prompt.strip(),
-            prioritize=st.session_state.get("prioritize_dashboard", "both"),
-            use_web=st.session_state["enable_web_search"],
-            use_spec=st.session_state["enable_specialized_apac"],
-        )
-
-    st.session_state["pending_query"] = {
-        "prompt": prompt.strip(),
-        "raw_context": raw_context,
-        "files": files_payload,
-        "sources_used": sources_used,
-        "notes": notes,
-        "web_used": web_used,
-        "spec_used": spec_used,
-    }
-
-
-# ═════════════════════════════════════════════════════════════
-# HANDLER PENDING QUERY — satu kali, tanpa klik dua kali
-# ═════════════════════════════════════════════════════════════
-pq = st.session_state.get("pending_query")
-if pq:
-    raw_ctx = pq["raw_context"]
-    if len(raw_ctx) > MAX_CONTEXT_CHARS:
-        # ─────── CONTEXT GUARD ───────
-        rag_filtered = (
-            simple_rag_filter(pq["prompt"], raw_ctx, MAX_CONTEXT_CHARS)
-            if st.session_state.get("enable_rag", True)
-            else raw_ctx[:MAX_CONTEXT_CHARS]
-        )
-        st.markdown(
-            f'<div class="context-warning">'
-            f'⚠️ <strong>Konteks sangat panjang</strong> '
-            f'({len(raw_ctx):,} karakter ≈ {estimate_tokens(raw_ctx):,} token) — '
-            f'melebihi batas aman {MAX_CONTEXT_CHARS:,} karakter '
-            f'(≈{estimate_tokens("x"*MAX_CONTEXT_CHARS):,} token). '
-            f'RAG menyaring menjadi {len(rag_filtered):,} karakter '
-            f'(≈{estimate_tokens(rag_filtered):,} token). '
-            f'Silakan konfirmasi cara melanjutkan.'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        with st.expander("🔍 Pratinjau konteks terfilter (RAG)", expanded=True):
-            st.text_area("Konteks terfilter", rag_filtered, height=220,
-                         disabled=True, label_visibility="collapsed")
-        with st.expander("🔍 Lihat konteks penuh sebelum dipotong"):
-            st.text_area("Konteks penuh", raw_ctx, height=220,
-                         disabled=True, label_visibility="collapsed")
-
-        c1, c2, c3 = st.columns(3)
-        if c1.button("✅ Pakai Konteks Terfilter (disarankan)",
-                     type="primary", use_container_width=True):
-            _execute_query(pq["prompt"], pq["files"], rag_filtered,
-                           pq["sources_used"] + ["Context-Guard: RAG filter"],
-                           pq["web_used"], pq["spec_used"])
-            st.session_state["pending_query"] = None
-
-        if c2.button("🚀 Paksa Konteks Penuh (risiko token limit)",
-                     use_container_width=True):
-            _execute_query(pq["prompt"], pq["files"], raw_ctx,
-                           pq["sources_used"] + ["Context-Guard: forced full"],
-                           pq["web_used"], pq["spec_used"])
-            st.session_state["pending_query"] = None
-
-        if c3.button("❌ Batal", use_container_width=True):
-            st.session_state["pending_query"] = None
-            st.rerun()
-    else:
-        # Konteks aman — eksekusi langsung
-        _execute_query(pq["prompt"], pq["files"], raw_ctx,
-                       pq["sources_used"], pq["web_used"], pq["spec_used"])
-        st.session_state["pending_query"] = None
-        render_context_notes(pq["notes"])
-
-
-# ═════════════════════════════════════════════════════════════
-# RIWAYAT + FEEDBACK + EXPORT
-# ═════════════════════════════════════════════════════════════
-if st.session_state["chat_history"]:
     st.markdown("---")
-    st.subheader("📜 Riwayat Percakapan (Session ini)")
+    st.markdown("### ⚙️ Model & Bahasa")
 
-    history_md_parts: List[str] = ["# Riwayat Chat - ID Telco Digital AI\n"]
-    history_txt_parts: List[str] = []
-    history_wa_parts: List[str] = []
+    choice_ids = [c["id"] for c in PROVIDER_CHOICES]
+    cur_id = st.session_state.get("model_selected", DEFAULT_CHOICE_ID)
+    if cur_id not in choice_ids: cur_id = DEFAULT_CHOICE_ID
+    try: idx = choice_ids.index(cur_id)
+    except Exception: idx = 0
+    selected_id = st.selectbox(
+        "Model AI", options=choice_ids, index=idx,
+        format_func=lambda i: CHOICE_BY_ID[i]["label"],
+        label_visibility="visible")
+    st.session_state["model_selected"] = selected_id
+    choice = CHOICE_BY_ID[selected_id]
+    model = choice["model"]
+    cap = {"type": choice["type"], "max_files": choice.get("max_files", 0),
+           "accept": choice.get("accept", [])}
 
-    for idx, item in enumerate(st.session_state["chat_history"]):
-        role = item["role"]
-        ip = item.get("ip", "unknown")
-        country = item.get("country", "unknown")
-        origin = item.get("origin_url", "") or ""
-        session_id = st.session_state.get("session_id", "-")
+    lang_keys = list(LANG_OPTIONS.keys())
+    lang_labels = list(LANG_OPTIONS.values())
+    cur_lang = st.session_state.get("answer_lang", "id")
+    li = lang_keys.index(cur_lang) if cur_lang in lang_keys else 0
+    st.session_state["answer_lang"] = lang_keys[lang_labels.index(
+        st.selectbox("Bahasa jawaban", lang_labels, index=li))]
 
-        if role == "user":
-            has_public = (ip not in ("unknown", "internal", "", None)
-                          and not str(ip).startswith(("10.", "172.", "192.168.",
-                                                      "127.", "169.254.", "100.6")))
-            if has_public:
-                role_label = f"👤 [{ip}] · [{country}]"
-                role_plain = f"[{ip}] [{country}]"
-            else:
-                role_label = f"👤 Session `{session_id}`"
-                role_plain = f"Session {session_id}"
+    st.caption(f"`{choice['provider']}` · `{choice['model']}`")
+
+    st.markdown("---")
+    st.markdown("### 📎 Upload")
+    uploaded_files = []
+    if cap["type"] in ("vision","multimodal") or cap["accept"]:
+        accept = cap["accept"] or ["png","jpg","jpeg","webp","gif","pdf","txt","md"]
+        uploaded_files = st.file_uploader(
+            "File pendukung", type=accept, accept_multiple_files=True,
+            label_visibility="collapsed")
+        mf = max(cap.get("max_files", 0), 3)
+        if uploaded_files and len(uploaded_files) > mf:
+            uploaded_files = uploaded_files[:mf]
+            st.caption(f"⚠️ Hanya {mf} file pertama dipakai.")
+
+    st.markdown("---")
+    st.caption(f"Session: `{st.session_state.get('session_id','-')}`")
+    if st.session_state.get("last_log_status"):
+        st.caption(f"Last log: {st.session_state['last_log_status']}")
+
+# ═════════════════════════════════════════════════════════════
+# SECTION: CHAT
+# ═════════════════════════════════════════════════════════════
+if nav == "💬 Chat":
+    prompt = st.text_area(
+        "Masukkan Pertanyaan Anda",
+        value=st.session_state.get("prompt_history", ""),
+        height=140,
+        placeholder=("Contoh:\n"
+                     "Apa tren terbaru Data Center di Asia Pacific 2026?\n"
+                     "Buatkan diagram Mermaid arsitektur 5G Core.\n"
+                     "Update proyek kabel laut Indonesia (Nongsa-Changi, Echo)?"),
+        key="prompt_input")
+
+    if st.button("🚀 Tanya AI", type="primary", use_container_width=True):
+        if not prompt.strip():
+            st.warning("⚠️ Isi pertanyaan terlebih dahulu."); st.stop()
+        allowed, msg = _rate_limit_check()
+        if not allowed: st.error(f"🚦 {msg}"); st.stop()
+
+        log_access(feature="query_start", prompt=prompt, model=model,
+                   files_count=len(uploaded_files or []),
+                   web_search=st.session_state["enable_web_search"],
+                   specialized=st.session_state["enable_specialized_apac"])
+
+        files_payload = []
+        for f in (uploaded_files or []):
+            try: files_payload.append((f.name, f.type or "application/octet-stream", f.getvalue()))
+            except Exception:
+                try: files_payload.append((f.name, f.type or "application/octet-stream", f.read()))
+                except Exception: pass
+
+        with st.spinner("⭐ Menyusun konteks..."):
+            if st.session_state.get("force_refresh_context"):
+                try:
+                    ddg_fetch.clear(); scrape_dashboard.clear(); fetch_rss_headlines.clear()
+                except Exception: pass
+            raw, sources, notes, w_used, s_used = build_search_context(
+                prompt=prompt.strip(),
+                prioritize=st.session_state.get("prioritize_dashboard","both"),
+                use_web=st.session_state["enable_web_search"],
+                use_spec=st.session_state["enable_specialized_apac"])
+        st.session_state["pending_query"] = {
+            "prompt": prompt.strip(), "raw": raw, "files": files_payload,
+            "sources": sources, "notes": notes,
+            "w_used": w_used, "s_used": s_used}
+
+    # Handle pending_query — konfirmasi context guard ATAU eksekusi langsung
+    pq = st.session_state.get("pending_query")
+    if pq:
+        raw = pq["raw"]
+        if len(raw) > MAX_CONTEXT_CHARS:
+            filtered = (simple_rag_filter(pq["prompt"], raw, MAX_CONTEXT_CHARS)
+                        if st.session_state.get("enable_rag", True)
+                        else raw[:MAX_CONTEXT_CHARS])
+            st.markdown(
+                f'<div class="context-warning">'
+                f'⚠️ <strong>Konteks sangat panjang</strong> '
+                f'({len(raw):,} char ≈ {estimate_tokens(raw):,} token) — melebihi batas '
+                f'{MAX_CONTEXT_CHARS:,} char. RAG menyaring jadi {len(filtered):,} char '
+                f'(≈{estimate_tokens(filtered):,} token). Konfirmasi cara lanjut:'
+                f'</div>', unsafe_allow_html=True)
+            with st.expander("🔍 Pratinjau konteks terfilter (RAG)", expanded=True):
+                st.text_area("Konteks terfilter", filtered, height=200,
+                             disabled=True, label_visibility="collapsed")
+            with st.expander("🔍 Konteks penuh (sebelum filter)"):
+                st.text_area("Konteks penuh", raw, height=200,
+                             disabled=True, label_visibility="collapsed")
+            c1, c2, c3 = st.columns(3)
+            if c1.button("✅ Pakai Konteks Terfilter", type="primary", use_container_width=True):
+                _execute_query(pq["prompt"], pq["files"], filtered,
+                               pq["sources"] + ["Context-Guard: RAG filter"],
+                               pq["w_used"], pq["s_used"])
+                st.session_state["pending_query"] = None
+                render_context_notes(pq["notes"])
+            if c2.button("🚀 Paksa Penuh (risiko token limit)", use_container_width=True):
+                _execute_query(pq["prompt"], pq["files"], raw,
+                               pq["sources"] + ["Context-Guard: forced full"],
+                               pq["w_used"], pq["s_used"])
+                st.session_state["pending_query"] = None
+                render_context_notes(pq["notes"])
+            if c3.button("❌ Batal", use_container_width=True):
+                st.session_state["pending_query"] = None
+                st.rerun()
         else:
-            role_label = "🤖 AI"
-            role_plain = "AI"
+            _execute_query(pq["prompt"], pq["files"], raw, pq["sources"],
+                           pq["w_used"], pq["s_used"])
+            st.session_state["pending_query"] = None
+            render_context_notes(pq["notes"])
 
-        st.markdown(f"**{role_label}** · `{item.get('time','')}` · "
-                    f"`{item.get('model','')}`")
-        if role == "user" and origin:
-            st.caption(f"🔗 Dari: {origin}")
-
-        with st.container(border=True):
-            st.markdown(item.get("content", ""))
-
-        # Feedback
-        if role == "assistant":
-            fb = item.get("feedback")
-            if fb:
-                st.caption(f"✅ Feedback tercatat: {'👍' if fb == 1 else '👎'}")
+    # Riwayat + feedback + export
+    if st.session_state["chat_history"]:
+        st.markdown("---")
+        st.subheader("📜 Riwayat Percakapan")
+        md_parts, txt_parts, wa_parts = ["# Riwayat Chat\n"], [], []
+        for i, item in enumerate(st.session_state["chat_history"]):
+            role = item["role"]
+            ip = item.get("ip","unknown"); country = item.get("country","unknown")
+            origin = item.get("origin_url","") or ""
+            sid = st.session_state.get("session_id","-")
+            if role == "user":
+                has_pub = (ip not in ("unknown","internal","",None)
+                           and not str(ip).startswith(("10.","172.","192.168.","127.","169.254.","100.6")))
+                label = f"👤 [{ip}] · [{country}]" if has_pub else f"👤 Session `{sid}`"
+                plain = f"[{ip}] [{country}]" if has_pub else f"Session {sid}"
             else:
-                fc1, fc2, _ = st.columns([1, 1, 6])
-                if fc1.button("👍 Bermanfaat", key=f"fb_up_{idx}",
-                              use_container_width=True):
-                    item["feedback"] = 1
-                    log_access(feature="feedback", feedback="positive",
-                               prompt=item.get("user_prompt", "")[:MAX_LOG_PROMPT_LEN],
-                               answer=item.get("content", "")[:600],
-                               model=item.get("model", ""))
-                    st.rerun()
-                if fc2.button("👎 Kurang akurat", key=f"fb_dn_{idx}",
-                              use_container_width=True):
-                    item["feedback"] = -1
-                    log_access(feature="feedback", feedback="negative",
-                               prompt=item.get("user_prompt", "")[:MAX_LOG_PROMPT_LEN],
-                               answer=item.get("content", "")[:600],
-                               model=item.get("model", ""))
-                    st.rerun()
+                label, plain = "🤖 AI", "AI"
+            st.markdown(f"**{label}** · `{item.get('time','')}` · `{item.get('model','')}`")
+            if role == "user" and origin: st.caption(f"🔗 Dari: {origin}")
+            with st.container(border=True):
+                st.markdown(item.get("content",""))
+            if role == "assistant":
+                fb = item.get("feedback")
+                if fb:
+                    st.caption(f"✅ Feedback: {'👍' if fb == 1 else '👎'}")
+                else:
+                    fc1, fc2, _ = st.columns([1,1,6])
+                    if fc1.button("👍 Bermanfaat", key=f"u_{i}", use_container_width=True):
+                        item["feedback"] = 1
+                        log_access(feature="feedback", feedback="positive",
+                                   prompt=item.get("user_prompt","")[:MAX_LOG_PROMPT_LEN],
+                                   answer=item.get("content","")[:600],
+                                   model=item.get("model",""))
+                        st.rerun()
+                    if fc2.button("👎 Kurang akurat", key=f"d_{i}", use_container_width=True):
+                        item["feedback"] = -1
+                        log_access(feature="feedback", feedback="negative",
+                                   prompt=item.get("user_prompt","")[:MAX_LOG_PROMPT_LEN],
+                                   answer=item.get("content","")[:600],
+                                   model=item.get("model",""))
+                        st.rerun()
+            md_parts.append(f"**{label}** ({item['time']}) — `{item['model']}`\n"
+                            + (f"Dari: {origin}\n" if origin else "")
+                            + f"\n{item['content']}\n\n---\n")
+            txt_parts.append(f"[{item['time']}] {plain} ({item['model']}):\n{item['content']}\n")
+            wa_parts.append(f"*{plain}* ({item['time']})\n{item['content']}\n")
+        ts = datetime.now().strftime("%Y%m%d_%H%M")
+        c1,c2,c3,c4,c5 = st.columns(5)
+        with c1: st.download_button("⬇️ Markdown", "\n".join(md_parts),
+                                    f"chat_{ts}.md", "text/markdown",
+                                    use_container_width=True)
+        with c2: st.download_button("⬇️ TXT", "\n".join(txt_parts),
+                                    f"chat_{ts}.txt", "text/plain",
+                                    use_container_width=True)
+        with c3: st.download_button("⬇️ WA", "\n".join(wa_parts),
+                                    f"chat_wa_{ts}.txt", "text/plain",
+                                    use_container_width=True)
+        with c4:
+            pdf = create_pdf_from_history(st.session_state["chat_history"])
+            if pdf and len(pdf) > 100:
+                st.download_button("⬇️ PDF", pdf, f"chat_{ts}.pdf",
+                                   "application/pdf", use_container_width=True,
+                                   key="pdf_dl")
+            else:
+                st.button("⬇️ PDF (n/a)", disabled=True, use_container_width=True)
+        with c5:
+            if st.button("🗑️ Hapus", use_container_width=True):
+                st.session_state["chat_history"] = []
+                log_access(feature="clear_history"); st.rerun()
 
-        # Akumulasi export
-        history_md_parts.append(f"**{role_label}** ({item['time']}) — `{item['model']}`\n")
-        if origin:
-            history_md_parts.append(f"Dari: {origin}\n")
-        history_md_parts.append(f"\n{item['content']}\n\n---\n")
-        history_txt_parts.append(f"[{item['time']}] {role_plain} "
-                                 f"({item['model']}):\n{item['content']}\n")
-        history_wa_parts.append(f"*{role_plain}* ({item['time']})\n"
-                                f"{item['content']}\n")
+# ═════════════════════════════════════════════════════════════
+# SECTION: SEARCH & RAG
+# ═════════════════════════════════════════════════════════════
+elif nav == "🔍 Search & RAG":
+    st.header("🔍 Search & RAG Configuration")
+    st.caption("Atur perilaku pencarian DuckDuckGo dan filter RAG di sini.")
 
-    history_md = "\n".join(history_md_parts)
-    history_txt = "\n".join(history_txt_parts)
-    history_wa = "\n".join(history_wa_parts)
-    ts = datetime.now().strftime("%Y%m%d_%H%M")
-
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2 = st.columns(2)
     with col1:
-        st.download_button("⬇️ Markdown", history_md, f"chat_{ts}.md",
-                           "text/markdown", use_container_width=True)
-    with col2:
-        st.download_button("⬇️ Plain Text", history_txt, f"chat_{ts}.txt",
-                           "text/plain", use_container_width=True)
-    with col3:
-        st.download_button("⬇️ WhatsApp", history_wa, f"chat_wa_{ts}.txt",
-                           "text/plain", use_container_width=True)
-    with col4:
-        pdf_bytes = create_pdf_from_history(st.session_state["chat_history"])
-        if pdf_bytes and len(pdf_bytes) > 100:
-            st.download_button("⬇️ PDF", pdf_bytes, f"chat_{ts}.pdf",
-                               "application/pdf", use_container_width=True,
-                               key="btn_pdf_dl")
+        st.markdown("### 🌐 DuckDuckGo Web Search")
+        st.session_state["enable_web_search"] = st.checkbox(
+            "Aktifkan web search umum", value=st.session_state["enable_web_search"])
+        st.caption("Query langsung ke DuckDuckGo untuk topik umum.")
+        if not DDG_AVAILABLE:
+            st.error(f"❌ duckduckgo-search tidak tersedia: {DDG_ERROR}")
         else:
-            st.button("⬇️ PDF (tidak tersedia)", disabled=True,
-                      use_container_width=True, key="btn_pdf_dis")
-    with col5:
-        if st.button("🗑️ Hapus Riwayat", use_container_width=True):
-            st.session_state["chat_history"] = []
-            log_access(feature="clear_history")
-            st.rerun()
+            st.success("✅ duckduckgo-search tersedia")
+            test_q = st.text_input("Test query (opsional)", value="data center Indonesia 2026")
+            if st.button("🔎 Test Search", use_container_width=False):
+                with st.spinner("Mencari..."):
+                    res, err = ddg_fetch(test_q, 3)
+                if err: st.error(f"Error: {err}")
+                elif not res: st.warning("Tidak ada hasil.")
+                else:
+                    st.success(f"{len(res)} hasil ditemukan")
+                    for r in res:
+                        st.markdown(f"**{r.get('title','')}**")
+                        st.caption(r.get("body","")[:200])
+                        st.caption(f"🔗 {r.get('href','')}")
 
+    with col2:
+        st.markdown("### 🧠 Simple RAG Filter")
+        st.session_state["enable_rag"] = st.checkbox(
+            "Aktifkan RAG filter", value=st.session_state["enable_rag"])
+        st.caption(f"Filter konteks > {MAX_CONTEXT_CHARS:,} char ke top-{RAG_TOP_K} paragraf relevan.")
+        if SKLEARN_AVAILABLE:
+            st.success("✅ TF-IDF (scikit-learn) tersedia")
+        else:
+            st.warning("⚠️ sklearn tidak tersedia — fallback: keyword overlap")
+
+        st.markdown("### 📚 Sumber Kurasi")
+        st.session_state["enable_specialized_apac"] = st.checkbox(
+            "Aktifkan dashboard kurasi DC & FO", value=st.session_state["enable_specialized_apac"])
+        if st.session_state["enable_specialized_apac"]:
+            st.session_state["prioritize_dashboard"] = st.selectbox(
+                "Prioritaskan",
+                options=["both","dc","fo"],
+                format_func=lambda x: {"both":"DC + FO","dc":"Hanya DC","fo":"Hanya FO"}[x],
+                index=["both","dc","fo"].index(st.session_state.get("prioritize_dashboard","both")))
+            st.session_state["force_refresh_context"] = st.checkbox(
+                "Force refresh context (abaikan cache)",
+                value=st.session_state["force_refresh_context"])
+
+        st.markdown("### 🧪 Test RAG Filter")
+        sample_ctx = st.text_area(
+            "Sample konteks (dummy)", 
+            "Data center Batam berkembang pesat dengan investasi CoreWeave.\n\n"
+            "Kabel laut Nongsa-Changi baru saja mendarat.\n\n"
+            "Cuaca di Jakarta hari ini cerah.\n\n"
+            "Firmus membangun AI Factory 360 MW di Batam.",
+            height=120)
+        sample_q = st.text_input("Query untuk test", value="kapan Nongsa-Changi mendarat?")
+        if st.button("🧠 Test RAG", use_container_width=False):
+            filtered = simple_rag_filter(sample_q, sample_ctx, 200)
+            st.markdown("**Hasil filter:**")
+            st.markdown(f'<div class="code-fallback">{html.escape(filtered)}</div>',
+                        unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════
-# FOOTER
+# SECTION: LOGS & ANALYTICS
 # ═════════════════════════════════════════════════════════════
+elif nav == "📊 Logs & Analytics":
+    st.header("📊 Logs & Analytics")
+    tab1, tab2 = st.tabs(["🔧 Supabase Status", "📈 Admin Analytics"])
+
+    with tab1:
+        st.markdown("### 🔧 Status Supabase Logging")
+        if not SUPABASE_AVAILABLE:
+            st.error(f"❌ Library supabase tidak terinstall: {SUPABASE_ERROR}")
+        else:
+            sb = get_supabase_client()
+            if sb is None:
+                st.error("❌ Supabase belum dikonfigurasi (SUPABASE_URL / SUPABASE_KEY)")
+            else:
+                st.success(f"✅ Terhubung ke tabel `{get_supabase_table_name()}`")
+                if st.button("🧪 Test Tulis Log"):
+                    ok, msg = log_access(feature="test_log", prompt="manual test from UI")
+                    st.session_state["last_log_status"] = f"{'✅' if ok else '❌'} {msg}"
+                    st.info(msg)
+
+        st.markdown("### 🔑 Status Secrets")
+        hf, groq, ork = get_api_keys()
+        st.markdown(f"""
+| Secret | Status |
+|---|---|
+| HF_TOKEN | {'✅' if hf else '❌'} |
+| GROQ_API_KEY | {'✅' if groq else '❌'} |
+| OPENROUTER_API_KEY | {'✅' if ork else '❌'} |
+| SUPABASE_URL | {'✅' if _get_secret('SUPABASE_URL') else '❌'} |
+| SUPABASE_KEY | {'✅' if _get_secret('SUPABASE_KEY','SUPABASE_ANON_KEY') else '❌'} |
+| SUPABASE_SERVICE_KEY (opsional) | {'✅' if _get_secret('SUPABASE_SERVICE_KEY') else '—'} |
+| ADMIN_PASSWORD_HASH | {'✅' if _get_secret('ADMIN_PASSWORD_HASH') else '❌'} |
+""")
+
+        st.markdown("### 📋 Log Terbaru (via session ini)")
+        if st.session_state["chat_history"]:
+            recent = [h for h in st.session_state["chat_history"] if h["role"]=="user"][-10:]
+            for r in reversed(recent):
+                st.caption(f"🕒 {r.get('time','')} · {r.get('model','')} · "
+                           f"{r.get('ip','?')} ({r.get('country','?')})")
+                st.markdown(f"> {r.get('content','')[:200]}...")
+        else:
+            st.info("Belum ada aktivitas di session ini.")
+
+    with tab2:
+        render_admin_analytics()
+
+# ═════════════════════════════════════════════════════════════
+# SECTION: DIAGNOSTICS
+# ═════════════════════════════════════════════════════════════
+elif nav == "ℹ️ Diagnostics":
+    st.header("ℹ️ System Diagnostics")
+
+    st.markdown("### 📦 Optional Dependencies")
+    deps = [
+        ("duckduckgo-search", DDG_AVAILABLE, DDG_ERROR),
+        ("beautifulsoup4", BS4_AVAILABLE, BS4_ERROR),
+        ("supabase", SUPABASE_AVAILABLE, SUPABASE_ERROR),
+        ("fpdf2", FPDF_AVAILABLE, FPDF_ERROR),
+        ("pypdf", PYPDF_AVAILABLE, PYPDF_ERROR),
+        ("pandas", PANDAS_AVAILABLE, PANDAS_ERROR),
+        ("scikit-learn", SKLEARN_AVAILABLE, SKLEARN_ERROR),
+    ]
+    for name, avail, err in deps:
+        st.markdown(f"- **{name}**: {'✅ tersedia' if avail else f'❌ {err}'}")
+
+    st.markdown("### 🔬 Model Availability (probe live)")
+    c = CHOICE_BY_ID.get(st.session_state["model_selected"], CHOICE_BY_ID[DEFAULT_CHOICE_ID])
+    if st.button("🔎 Cek model terpilih", use_container_width=False):
+        hf, groq, ork = get_api_keys()
+        api_key = {"groq": groq, "openrouter": ork, "hf": hf}[c["provider"]]
+        avail, note = check_model_availability(c["provider"], c["model"], api_key or "")
+        (st.success if avail else st.warning)(f"{c['label']} — {note}")
+
+    if st.button("🔎 Cek semua provider (sampling)", use_container_width=False):
+        hf, groq, ork = get_api_keys()
+        for ch in PROVIDER_CHOICES[:6]:
+            api_key = {"groq": groq, "openrouter": ork, "hf": hf}[ch["provider"]]
+            if not api_key:
+                st.caption(f"⏭️ {ch['label']}: skip (no key)")
+                continue
+            with st.spinner(f"Cek {ch['label']}..."):
+                avail, note = check_model_availability(ch["provider"], ch["model"], api_key)
+            icon = "✅" if avail else "⚠️"
+            st.caption(f"{icon} {ch['label']}: {note}")
+
+    st.markdown("### 🧪 Tools")
+    if st.button("🧹 Clear semua cache", use_container_width=False):
+        try:
+            ddg_fetch.clear(); scrape_dashboard.clear()
+            fetch_rss_headlines.clear(); check_model_availability.clear()
+            st.success("Cache dibersihkan.")
+        except Exception as e:
+            st.error(f"Gagal: {e}")
+
+    st.markdown("### 🔐 Generate Admin Password Hash")
+    pwd_in = st.text_input("Password yang ingin di-hash", type="password")
+    if pwd_in:
+        st.code(hashlib.sha256(pwd_in.encode()).hexdigest(), language="text")
+        st.caption("Copy hasil ke Streamlit Secrets: `ADMIN_PASSWORD_HASH = \"...\"`")
+
+# ── FOOTER ───────────────────────────────────────────────────
 st.markdown("---")
-st.caption(
-    f"ID Telco Digital AI v{APP_VERSION} · "
-    f"Session: `{st.session_state.get('session_id', '-')}` · "
-    f"Context Guard ±{MAX_CONTEXT_CHARS:,} char · "
-    f"RAG {'TF-IDF' if SKLEARN_AVAILABLE else 'keyword-overlap'} · "
-    "Sumber kurasi: Live DC & FO/Subsea ASPAC oleh nap@iicf.or.id."
-)
+st.caption(f"ID Telco Digital AI v{APP_VERSION} · Session `{st.session_state.get('session_id','-')}` · "
+           f"Theme: {_detect_theme()} · Context Guard ±{MAX_CONTEXT_CHARS:,} char · "
+           f"RAG {'TF-IDF' if SKLEARN_AVAILABLE else 'keyword'}")
