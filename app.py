@@ -654,16 +654,18 @@ def get_supabase_client(admin: bool = False) -> Optional["Client"]:
 
 def append_behavior_log(row: Dict[str, Any]) -> Tuple[bool, str]:
     """
-    Insert log row. Tipe kolom dipertahankan (bukan semua str) sesuai skema Supabase.
+    Insert log via raw requests dengan 'Prefer: return=minimal' untuk menghindari
+    PostgREST menambahkan RETURNING (yang butuh SELECT policy untuk anon).
     """
     try:
-        client = get_supabase_client()
-        if client is None:
-            reason = ("Supabase library missing" if not SUPABASE_AVAILABLE
-                      else "SUPABASE_URL / SUPABASE_KEY tidak terbaca")
-            return False, reason
+        url = _get_secret("SUPABASE_URL")
+        key = _get_secret("SUPABASE_KEY", "SUPABASE_ANON_KEY")
+        if not url or not key:
+            return False, ("SUPABASE_URL / SUPABASE_KEY tidak terbaca di secrets")
+
         table = get_supabase_table_name()
-        # Biarkan tipe asli (bool, int) apa adanya; hanya konversi None
+
+        # Bersihkan row (None → "", biarkan bool/int apa adanya)
         clean: Dict[str, Any] = {}
         for k, v in row.items():
             if v is None:
@@ -672,13 +674,33 @@ def append_behavior_log(row: Dict[str, Any]) -> Tuple[bool, str]:
                 clean[k] = v
             else:
                 clean[k] = str(v)
-        client.table(table).insert(clean).execute()
-        return True, f"OK → tabel `{table}`"
+
+        headers = {
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            # ★ KUNCI: jangan minta row yang di-insert dikembalikan
+            "Prefer": "return=minimal",
+        }
+
+        endpoint = f"{url.rstrip('/')}/rest/v1/{table}"
+        r = requests.post(endpoint, json=clean, headers=headers, timeout=10)
+
+        # PostgREST mengembalikan 201 Created dengan return=minimal
+        if r.status_code in (200, 201, 204):
+            return True, f"OK → tabel `{table}`"
+
+        # Error handling
+        body = (r.text or "")[:300]
+        if r.status_code == 409:
+            return False, f"Konflik (duplikat?) — HTTP {r.status_code}"
+        if r.status_code == 401:
+            return False, "Auth gagal — cek SUPABASE_KEY"
+        if r.status_code == 404:
+            return False, f"Tabel `{table}` tidak ditemukan"
+        return False, f"HTTP {r.status_code}: {body}"
     except Exception as e:  # noqa: BLE001
-        msg = str(e)[:300]
-        if st.session_state.get("debug_mode"):
-            st.warning(f"[Log] Gagal tulis: {msg}")
-        return False, msg
+        return False, str(e)[:300]
 
 def log_access(
     feature: str,
