@@ -796,18 +796,39 @@ def check_model_availability(provider: str, model: str, api_key: str) -> Tuple[b
 # SEARCH & SCRAPE
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
-def ddg_fetch(query: str, max_results: int = 4) -> Tuple[List[Dict[str, Any]], str]:
+import time
+import random
+from ddgs import DDGS
+from ddgs.exceptions import RatelimitException, TimeoutException
+
+def ddg_fetch_with_retry(query: str, max_results: int = 4, max_retries: int = 3) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    DuckDuckGo search dengan exponential backoff + jitter.
+    Mencoba ulang jika terjadi rate limit atau timeout.
+    """
     if not DDG_AVAILABLE:
-        return [], f"duckduckgo-search tidak tersedia ({DDG_ERROR})"
-    try:
-        with DDGS() as d:
-            res = list(d.text(query, max_results=max_results))
-        return res, ""
-    except Exception as e:  # noqa: BLE001
-        m = str(e)[:150]
-        if "429" in m or "Ratelimit" in m.lower():
-            return [], "DuckDuckGo rate-limit. Coba beberapa menit lagi."
-        return [], m
+        return [], f"ddgs tidak tersedia"
+    initial_delay = 2  # detik
+    for attempt in range(max_retries):
+        try:
+            # Gunakan timeout untuk mencegah blocking
+            with DDGS(timeout=15) as ddgs:
+                res = list(ddgs.text(query, max_results=max_results))
+            return res, ""
+        except RatelimitException:
+            if attempt == max_retries - 1:
+                return [], "DuckDuckGo rate-limit. Coba lagi nanti atau gunakan proxy."
+            # Exponential backoff dengan jitter
+            delay = initial_delay * (2 ** attempt) + random.uniform(0, 1)
+            time.sleep(delay)
+        except TimeoutException:
+            if attempt == max_retries - 1:
+                return [], "Timeout saat menghubungi DuckDuckGo."
+            time.sleep(initial_delay)
+        except Exception as e:
+            # Error lain, tidak perlu retry
+            return [], str(e)[:150]
+    return [], "Gagal setelah beberapa percobaan."
 
 @st.cache_data(ttl=300, show_spinner=False)
 def scrape_dashboard(url: str, max_chars: int = 2500) -> Tuple[str, str, str]:
