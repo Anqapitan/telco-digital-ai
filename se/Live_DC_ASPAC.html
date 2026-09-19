@@ -680,10 +680,14 @@ async function fetchRssItems(q, days){
   }).filter(x => x.title && x.link);
 }
 // Fungsi fetchOpenAlex yang ditingkatkan dengan penanganan rate limit
-async function fetchOpenAlex(q, fromDate, retries = 3) {
-  const filter = fromDate ? "&filter=from_publication_date:" + fromDate : "";
+// Ganti dengan API key Anda dari https://openalex.org/settings/api
+const OPENALEX_API_KEY = "DaNtPZ1PgEFimqEkaChqYO";
+
+async function fetchOpenAlex(q, fromDate){
+  const filter = fromDate ? "&filter=from_publication_date:"+fromDate : "";
   const select = "title,publication_date,doi,cited_by_count,primary_location,abstract_inverted_index";
-  const url = "https://api.openalex.org/works?search=" + encodeURIComponent(q) + filter + "&per-page=8&select=" + select;
+  // Tambahkan parameter api_key ke URL
+  const url = "https://api.openalex.org/works?search="+encodeURIComponent(q)+filter+"&per-page=8&select="+select+"&api_key="+OPENALEX_API_KEY;
 
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
