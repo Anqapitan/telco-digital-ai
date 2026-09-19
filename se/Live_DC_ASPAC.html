@@ -677,7 +677,8 @@ function parseGdeltDate(s){
 
 async function fetchGdelt(q, days){
   const timespan = days ? days + "d" : "60d";
-  const url = "https://api.gdeltproject.org/api/v2/doc/doc?query=" + encodeURIComponent(q) + "&mode=artlist&maxrecords=30&format=json&timespan=" + timespan + "&sort=datedesc";
+  const gdeltQuery = String(q).replace(/[()"]/g, " ").replace(/\bOR\b/gi, " ").replace(/\s+/g, " ").trim();
+  const url = "https://api.gdeltproject.org/api/v2/doc/doc?query=" + encodeURIComponent(gdeltQuery) + "&mode=artlist&maxrecords=30&format=json&timespan=" + timespan + "&sort=datedesc";
   const r = await fetch(url, { signal: timeoutSignal(8000) });
   if(!r.ok) throw new Error("GDELT HTTP " + r.status);
   const j = await r.json();
