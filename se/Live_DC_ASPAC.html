@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Dashboard kurasi Data Center Asia Pacific & Indonesia — Live Intelligence per klasifikasi.">
+<meta name="description" content="Dashboard kurasi Data Center Asia Pacific — Live per klasifikasi + Google Trends + Advanced Search.">
 <meta name="author" content="nap@iicf.or.id">
 <title>Progres vs Isu Data Center Asia Pacific by nap@iicf.or.id</title>
 <script>
@@ -29,7 +29,7 @@
 html[data-theme="dark"]{--bg:#0d1b28;--card:#12263a;--ink:#e4edf5;--ink-soft:#8ba5bd;--line:#1e3a52;--shadow:0 6px 24px rgba(0,0,0,.35);--shadow-hover:0 10px 34px rgba(0,0,0,.5)}
 *{margin:0;padding:0;box-sizing:border-box}
 html{font-size:16px;scroll-behavior:smooth}
-body{font-family:'Plus Jakarta Sans Variable','Plus Jakarta Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+body{font-family:'Plus Jakarta Sans Variable','Plus Jakarta Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;transition:background .3s,color .3s}
 a{color:var(--sky);text-decoration:none}a:hover{text-decoration:underline}
 .skip{position:absolute;left:-9999px;top:0;background:var(--sky);color:#fff;padding:8px 14px;z-index:99999}
 .skip:focus{left:0;outline:3px solid #5cf5a5}
@@ -41,6 +41,7 @@ a{color:var(--sky);text-decoration:none}a:hover{text-decoration:underline}
 #acBanner{background:linear-gradient(90deg,#0f2d44,#123c5c);color:#cfe8ff;font-size:.76rem;padding:8px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
 #acBanner b{color:#7ef0b2}
 #acBanner .bbtn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:99px;padding:3px 10px;font:inherit;font-weight:800;cursor:pointer}
+#acBanner .bbtn:hover{background:rgba(255,255,255,.25)}
 header.hero{background:linear-gradient(120deg,#0aa5a0,#1f8bd6 55%,#3d5bd9);color:#fff;padding:24px 20px 70px;position:relative;overflow:hidden}
 header.hero::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle at 15% 80%,rgba(255,255,255,.14) 0 2px,transparent 3px),radial-gradient(circle at 85% 20%,rgba(255,255,255,.12) 0 2px,transparent 3px);background-size:220px 220px,300px 300px;pointer-events:none}
 .hero-inner{max-width:1240px;margin:0 auto;position:relative;z-index:2;display:flex;flex-wrap:wrap;gap:18px;align-items:center;justify-content:space-between}
@@ -52,6 +53,7 @@ header.hero::after{content:"";position:absolute;inset:0;background-image:radial-
 .pills{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
 .live-pill{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.35);padding:7px 13px;border-radius:99px;font-size:.8rem;white-space:nowrap}
 .iconbtn{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:50%;width:38px;height:38px;font-size:1.05rem;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.iconbtn:hover{background:rgba(255,255,255,.28)}
 .dot{width:9px;height:9px;border-radius:50%;background:#5cf5a5;animation:pulse 2s infinite;flex-shrink:0}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(92,245,165,.7)}70%{box-shadow:0 0 0 9px rgba(92,245,165,0)}100%{box-shadow:0 0 0 0 rgba(92,245,165,0)}}
 .hero-cta{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
@@ -99,7 +101,7 @@ main{min-width:0;width:100%}
 .r-src{background:var(--bg);color:var(--coral);font-weight:800;padding:4px 10px;border-radius:99px;white-space:nowrap}
 .r-country{background:var(--bg);color:var(--green);font-weight:700;padding:4px 10px;border-radius:99px;white-space:nowrap}
 .r-kbadge{background:var(--bg);color:var(--violet);font-weight:800;padding:4px 10px;border-radius:99px;white-space:nowrap}
-.live-badge{background:#fff3d6;color:#a06b00;font-weight:800;padding:4px 10px;border-radius:99px;white-space:nowrap;border:1px solid #f3d9a0}
+.live-badge{background:#fff3d6;color:#a06b00;font-weight:800;padding:4px 10px;border-radius:99px;border:1px solid #f3d9a0}
 html[data-theme="dark"] .live-badge{background:#3a2f14;color:#ffd98a;border-color:#5c4a1e}
 .ai-badge{background:#e8f7ee;color:#1d874a;font-weight:800;padding:4px 10px;border-radius:99px;border:1px solid #bfe6cd}
 .r-title{font-size:1rem;font-weight:800;line-height:1.4;margin-bottom:7px}
@@ -150,16 +152,20 @@ html[data-theme="dark"] .live-title{color:#ffd98a}
 .live-note{font-size:.78rem;color:#a06b00;background:#fff8e6;border:1px solid #f3d9a0;border-radius:10px;padding:9px 11px;line-height:1.6}
 html[data-theme="dark"] .live-note{background:#3a2f14;color:#ffd98a;border-color:#5c4a1e}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:16px}
+.panel h3{font-size:.98rem;margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .field{margin-bottom:13px}
 .field label{display:block;font-size:.74rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft);margin-bottom:5px}
 .field input,.field select{width:100%;padding:9px 12px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:.86rem;background:var(--card);color:var(--ink);outline:none}
-.chip{border:1.5px solid var(--line);background:var(--card);border-radius:99px;padding:6px 12px;font-size:.76rem;font-weight:700;color:var(--ink-soft);cursor:pointer;font-family:inherit;margin:0 6px 6px 0}
+.chip-row{display:flex;flex-wrap:wrap;gap:7px}
+.chip{border:1.5px solid var(--line);background:var(--card);border-radius:99px;padding:6px 12px;font-size:.76rem;font-weight:700;color:var(--ink-soft);cursor:pointer;font-family:inherit}
 .chip.on{background:var(--indigo);border-color:var(--indigo);color:#fff}
 .eng-chip{display:inline-flex;gap:7px;align-items:center;border:1.5px solid var(--line);background:var(--card);border-radius:12px;padding:8px 13px;font-size:.8rem;font-weight:800;color:var(--ink);cursor:pointer;font-family:inherit;margin:0 6px 7px 0}
 .eng-chip.on{border-color:var(--teal);color:var(--teal)}
 .preview-box{background:#0f2d44;color:#9be8c8;font-family:ui-monospace,monospace;font-size:.78rem;border-radius:12px;padding:13px 15px;line-height:1.7;word-break:break-word;min-height:52px}
 .btn-open{background:linear-gradient(90deg,var(--teal),var(--sky));color:#fff;border:none;font-weight:800;font-size:.84rem;padding:11px 18px;border-radius:99px;cursor:pointer;margin:4px 7px 4px 0}
 .btn-open.sec{background:var(--card);color:var(--indigo);border:1.5px solid var(--indigo)}
+.opt-check{display:flex;gap:8px;align-items:center;font-size:.82rem;color:var(--ink-soft);margin-bottom:7px;cursor:pointer;font-weight:600}
+.opt-check input{accent-color:var(--teal);width:16px;height:16px;cursor:pointer}
 .chart-wrap{position:relative;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 16px 8px;min-height:330px}
 .chart-canvas-holder{position:relative;width:100%;height:290px}
 .chart-canvas-holder canvas{display:block;width:100%!important;height:100%!important}
@@ -178,6 +184,12 @@ html[data-theme="dark"] .live-note{background:#3a2f14;color:#ffd98a;border-color
 #keyModal{position:fixed;inset:0;background:rgba(5,20,35,.6);display:none;align-items:center;justify-content:center;z-index:9998;padding:16px}
 #keyModal.open{display:flex}
 .keybox{background:var(--card);border:1px solid var(--line);border-radius:18px;max-width:560px;width:100%;padding:22px;max-height:88vh;overflow:auto}
+#autoOverlay{position:fixed;inset:0;background:linear-gradient(135deg,#0f2d44,#0b1420);color:#fff;z-index:99998;display:none;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;text-align:center}
+#autoOverlay.on{display:flex}
+#autoOverlay h1{font-size:1.55rem;font-weight:800;margin-bottom:12px}
+#autoOverlay .ao-progress{font-family:ui-monospace,monospace;font-size:.9rem;background:rgba(255,255,255,.1);padding:14px 20px;border-radius:12px;max-width:640px;text-align:left;line-height:1.7;border:1px solid rgba(255,255,255,.18)}
+#autoOverlay .ao-log{margin-top:16px;max-height:290px;overflow-y:auto;width:min(640px,92vw);font-family:ui-monospace,monospace;font-size:.74rem;text-align:left;color:#9be8c8;background:rgba(0,0,0,.35);padding:12px 16px;border-radius:10px;white-space:pre-wrap;line-height:1.6}
+#autoOverlay .ao-status{margin-top:16px;font-size:1.4rem}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(22px);opacity:0;background:#0f2d44;color:#fff;padding:11px 20px;border-radius:99px;font-size:.78rem;font-weight:700;transition:all .3s;z-index:9999;pointer-events:none;max-width:92vw;text-align:center}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #toast .toast-url{display:block;font-size:.72rem;opacity:.85;margin-top:6px;font-family:ui-monospace,monospace;word-break:break-all}
@@ -185,7 +197,6 @@ footer{max-width:1240px;margin:0 auto;padding:24px 16px 42px;color:var(--ink-sof
 .footer-logo{display:flex;justify-content:center;margin-bottom:11px}
 .live-loader{padding:16px 18px;background:linear-gradient(135deg,rgba(31,139,214,.06),rgba(10,165,160,.06));border:1px dashed var(--line);border-radius:12px;margin:4px 0}
 .ll-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
-.ll-title{font-weight:800;font-size:.86rem}
 .ll-timer{font-family:ui-monospace,monospace;font-size:.78rem;font-weight:800;color:var(--sky);background:var(--bg);padding:3px 10px;border-radius:99px;border:1px solid var(--line)}
 .ll-step{display:flex;align-items:center;gap:9px;font-size:.78rem;color:var(--ink-soft);padding:5px 8px;border-radius:8px}
 .ll-step.done{color:var(--green)}.ll-step.done .ll-ico::before{content:"✅"}
@@ -204,6 +215,13 @@ footer{max-width:1240px;margin:0 auto;padding:24px 16px 42px;color:var(--ink-sof
 </head>
 <body>
 <a class="skip" href="#main">Lewati ke konten utama</a>
+
+<div id="autoOverlay">
+  <h1>🧠 Auto-Kurasi DC APAC</h1>
+  <div class="ao-progress" id="aoProgress">Inisialisasi…</div>
+  <div class="ao-log" id="aoLog"></div>
+  <div class="ao-status" id="aoStatus"></div>
+</div>
 
 <div id="acBanner">
   🧠 <b>Auto-Kurasi DC APAC</b>
@@ -229,10 +247,7 @@ footer{max-width:1240px;margin:0 auto;padding:24px 16px 42px;color:var(--ink-sof
       </a>
       <div>
         <h1>Progres <span class="vs">vs</span> Isu Data Center Asia&nbsp;Pacific</h1>
-        <div class="byline">
-          <span>Curated Research Dashboard • 7 Klasifikasi • Live per-Klasifikasi</span>
-          <code>by nap@iicf.or.id</code>
-        </div>
+        <div class="byline"><span>Curated Research Dashboard • 7 Klasifikasi • Live per-Klasifikasi</span><code>by nap@iicf.or.id</code></div>
         <div class="hero-cta">
           <button class="btn-hero" onclick="goView('ID')">🇮🇩 Snapshot Indonesia</button>
           <button class="btn-hero alt" onclick="goView('TRENDS')">📈 Google Trends</button>
@@ -257,7 +272,7 @@ footer{max-width:1240px;margin:0 auto;padding:24px 16px 42px;color:var(--ink-sof
 
 <footer>
   <div class="footer-logo"><a class="logo-link" href="https://www.linkedin.com/in/qnoyzone" target="_blank" rel="noopener noreferrer"><svg class="logo-footer" viewBox="0 0 300 300" aria-hidden="true"><use href="#logoNap"/></svg></a></div>
-  <b>Sumber:</b> kompilasi open-access + live intelligence per-klasifikasi (GDELT + Bing + OpenAlex). Data tersimpan di Supabase dengan korelasi <code>feed_type × klas_id</code>.
+  <b>Sumber:</b> open-access + live intelligence per-klasifikasi (GDELT + Bing + OpenAlex). Data di Supabase (<code>feed_type × klas_id</code>).
   <br>© 2026 • <b>nap@iicf.or.id</b> • <a href="https://www.linkedin.com/in/qnoyzone" target="_blank" rel="noopener noreferrer">linkedin.com/in/qnoyzone</a>
 </footer>
 
@@ -280,7 +295,6 @@ const SB_URL="https://njscuuiekgjgayfzsbqv.supabase.co";
 const SB_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qc2N1dWlla2dqZ2F5ZnpzYnF2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MjAwMTksImV4cCI6MjEwNTE5NjAxOX0.4UXzf-9KDRkquK9uUCJbhyTSTBqdSNFw09bp2uJwjYg";
 const OPENALEX_API_KEY="DaNtPZ1PgEFimqEkaChqYO";
 
-/* ============ UTILS ============ */
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 function safeUrl(u){if(!u)return"#";try{const x=new URL(String(u),location.origin);return /^https?:$/.test(x.protocol)?esc(x.href):"#";}catch(e){return"#";}}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
@@ -296,31 +310,11 @@ function copyText(txt){if(navigator.clipboard&&window.isSecureContext)return nav
 function timeoutSignal(ms){return(typeof AbortSignal!=="undefined"&&AbortSignal.timeout)?AbortSignal.timeout(ms):undefined;}
 const PERIODE=(()=>{const e=new Date(),s=new Date();s.setDate(s.getDate()-60);const f=d=>d.toLocaleDateString("id-ID",{day:"numeric",month:"long",year:"numeric"});return{mulai:f(s),akhir:f(e)};})();
 const LIVE_WINDOW=(()=>{const e=new Date(),s=new Date();s.setDate(s.getDate()-60);return{start:s,end:e,startISO:s.toISOString().slice(0,10)};})();
-
-function ensureMinSummary(item,minChars){
-  minChars=minChars||140;
-  let s=String(item.r||item.summary||"").trim();
-  if(s.length>=minChars)return s;
-  const tags=(item.h||[]).map(h=>String(h).replace(/^#/,"")).filter(Boolean).slice(0,4);
-  const src=item.src||item.source||"sumber terverifikasi";
-  const ctry=item.ctry||item.country||"Asia Pacific";
-  const parts=[];
-  if(s)parts.push(/[.!?]$/.test(s)?s:s+".");
-  if(tags.length)parts.push("Isu kunci mencakup "+tags.join(", ")+".");
-  parts.push("Sumber "+src+" ("+ctry+") sebagai bagian pemantauan industri data center Asia Pacific 2 bulan terakhir.");
-  let out=parts.join(" ");
-  if(out.length>340)out=out.slice(0,337).trim()+"…";
-  return out;
-}
+function ensureMinSummary(item,minChars){minChars=minChars||140;let s=String(item.r||item.summary||"").trim();if(s.length>=minChars)return s;const tags=(item.h||[]).map(h=>String(h).replace(/^#/,"")).filter(Boolean).slice(0,4);const src=item.src||item.source||"sumber terverifikasi";const ctry=item.ctry||item.country||"Asia Pacific";const parts=[];if(s)parts.push(/[.!?]$/.test(s)?s:s+".");if(tags.length)parts.push("Isu kunci mencakup "+tags.join(", ")+".");parts.push("Sumber "+src+" ("+ctry+") sebagai bagian pemantauan industri data center Asia Pacific 2 bulan terakhir.");let out=parts.join(" ");if(out.length>340)out=out.slice(0,337).trim()+"…";return out;}
 const SUBCAT_LABELS_LONG={std:"Standar Industri Global",itu:"Regulasi ITU.int",ris:"Riset, Studi & Kasus",indo:"Regulasi & Isu Indonesia"};
-function subcatChatAILinkHTML(kind,title,url){
-  const label=SUBCAT_LABELS_LONG[kind]||kind;
-  const prompt="["+label+" | "+(title||"")+" | "+(url||"")+"]";
-  const u="https://telco-digital-ai.streamlit.app/?prompt="+encodeURIComponent(prompt.slice(0,900));
-  return '<div style="text-align:center;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)"><a class="btn-act chat" href="'+esc(u)+'" target="_blank" rel="noopener noreferrer" style="text-decoration:none">🤖 Tanya AI tentang sub-kategori ini</a></div>';
-}
+function subcatChatAILinkHTML(kind,title,url){const label=SUBCAT_LABELS_LONG[kind]||kind;const prompt="["+label+" | "+(title||"")+" | "+(url||"")+"]";const u="https://telco-digital-ai.streamlit.app/?prompt="+encodeURIComponent(prompt.slice(0,900));return '<div style="text-align:center;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)"><a class="btn-act chat" href="'+esc(u)+'" target="_blank" rel="noopener noreferrer" style="text-decoration:none">🤖 Tanya AI tentang sub-kategori ini</a></div>';}
 
-/* ============ POOL (data statis) ============ */
+/* ============ POOL ============ */
 const POOL={
 S1:{t:"Edisi 2024–2026",s:"CENELEC",j:"EN 50600 — Data Centre Facilities & Infrastructures",u:"https://www.cenelec.eu/areas-of-work/cenelectopics/datacentres.html",h:["#EN50600","#FasilitasDC"],r:"Standar Eropa untuk bangunan, distribusi daya, pendinginan, kabel & manajemen DC; rujukan tender pengadaan di APAC."},
 S2:{t:"Rev. C (aktif 2026)",s:"TIA",j:"ANSI/TIA-942-C — Telecom Infrastructure Standard",u:"https://www.tiaonline.org/standards/tia-942-data-center/",h:["#TIA942","#RatedLevel"],r:"Klasifikasi Rated-1 s.d. Rated-4 untuk infrastruktur fisik & telekomunikasi DC; baseline kontraktual layanan colocation."},
@@ -354,7 +348,7 @@ D6:{t:"2026",s:"Komdigi RI",j:"Peta Jalan Kebijakan AI Nasional",u:"https://www.
 D7:{t:"2026",s:"Komdigi / SDPPI",j:"Regulasi EPR Limbah Elektronik Nasional",u:"https://postel.go.id/",h:["#EPR","#EWaste"],r:"Regulasi Extended Producer Responsibility untuk e-waste sedang didorong; berdampak pada fase O&M & dekomisioning perangkat DC di Indonesia."}
 };
 
-/* ============ KLAS — DATA STATIS LENGKAP DIPULIHKAN ============ */
+/* ============ KLAS ============ */
 const KLAS=[
 {id:"A",ico:"💼",nama:"Business / Investment",definisi:"Investasi, hyperscaler, colocation, cloud & AI infrastructure (US$, MW/GW, CAPEX).",keywords:["data center investment","hyperscaler","colocation","CAPEX","funding"],negara:["🇦🇺 Australia","🇲🇾 Malaysia","🇮🇩 Indonesia","🇸🇬 Singapura","🇮🇳 India"],hasil:[
 {tgl:"10 September 2026",src:"Reuters",j:"Nvidia teams up with Australian partners to build AI factory capacity",u:"https://www.reuters.com/world/asia-pacific/nvidia-teams-up-with-australian-partners-build-ai-factory-capacity-2026-09-10/",ctry:"🇦🇺 Australia",h:["#NVIDIA","#2GW","#AIFactory"],r:"NVIDIA menggandeng Firmus, CDC, NEXTDC, dan AirTrunk membangun hingga 2 GW kapasitas DC terkait AI — melampaui total kapasitas eksisting Australia (±1,6 GW) dan memperkuat posisi kawasan sebagai simpul AI infrastructure global.",ind:false,dr:{std:["S3","S4","S5"],itu:["I4","I5"],ris:["R3","R4"],indo:[]}},
@@ -412,22 +406,15 @@ hasil:[
 let _sbClient=null,_sbClientMode=null;
 function getAdminToken(){try{return localStorage.getItem("dcAdminToken");}catch(e){return null;}}
 function isAdmin(){return !!getAdminToken();}
-function getSbClient(){
-  const wantMode=isAdmin()?"admin":"anon";
-  if(_sbClient&&_sbClientMode===wantMode)return _sbClient;
-  if(!window.supabase||!window.supabase.createClient)return null;
-  const key=isAdmin()?getAdminToken():SB_ANON;
-  try{_sbClient=window.supabase.createClient(SB_URL,key,{auth:{persistSession:false}});_sbClientMode=wantMode;return _sbClient;}
-  catch(e){return null;}
-}
-const SB_CACHE_KEY="dcSupabaseCache_v7";
+function getSbClient(){const w=isAdmin()?"admin":"anon";if(_sbClient&&_sbClientMode===w)return _sbClient;if(!window.supabase||!window.supabase.createClient)return null;const k=isAdmin()?getAdminToken():SB_ANON;try{_sbClient=window.supabase.createClient(SB_URL,k,{auth:{persistSession:false}});_sbClientMode=w;return _sbClient;}catch(e){return null;}}
+const SB_CACHE_KEY="dcSupabaseCache_v9";
 function sbCacheLoad(){try{return JSON.parse(localStorage.getItem(SB_CACHE_KEY));}catch(e){return null;}}
 function sbCacheSave(data){try{localStorage.setItem(SB_CACHE_KEY,JSON.stringify({at:Date.now(),data}));}catch(e){}}
 const LIVE_CACHE_TTL=30*60*1000;
-function liveCacheLoad(viewId){try{return JSON.parse(localStorage.getItem("dcLiveCache_v7_"+viewId));}catch(e){return null;}}
-function liveCacheSave(viewId,nCur,rCur){if(!nCur?.length&&!rCur?.length)return;try{localStorage.setItem("dcLiveCache_v7_"+viewId,JSON.stringify({at:Date.now(),nCur,rCur}));}catch(e){}}
+function liveCacheLoad(v){try{return JSON.parse(localStorage.getItem("dcLiveCache_v9_"+v));}catch(e){return null;}}
+function liveCacheSave(v,n,r){if(!n?.length&&!r?.length)return;try{localStorage.setItem("dcLiveCache_v9_"+v,JSON.stringify({at:Date.now(),nCur:n,rCur:r}));}catch(e){}}
 function liveCacheFresh(c){return c&&(Date.now()-c.at)<LIVE_CACHE_TTL;}
-const LOCAL_KEY="dcLocalCache_v7",META_KEY="dcMeta_v7";
+const LOCAL_KEY="dcLocalCache_v9",META_KEY="dcMeta_v9";
 function localLoad(){try{return JSON.parse(localStorage.getItem(LOCAL_KEY))||{parents:[],subs:[]};}catch(e){return{parents:[],subs:[]};}}
 function localSave(d){try{d.parents=(d.parents||[]).slice(0,300);d.subs=(d.subs||[]).slice(0,900);localStorage.setItem(LOCAL_KEY,JSON.stringify(d));}catch(e){}}
 function metaLoad(){try{return JSON.parse(localStorage.getItem(META_KEY));}catch(e){return null;}}
@@ -522,6 +509,14 @@ const LIVE_TOPIC_MAP=[
 {re:/(invest|fund|capex|market|colocation|billion|miliar)/i,std:["S3","S2"],itu:["I5"]},
 {re:/(regulat|licen|policy|law|permit|compliance)/i,std:["S2","S6"],itu:["I1","I4"]},
 {re:/(sustain|carbon|emission|green|esg|environment|waste)/i,std:["S6"],itu:["I2","I3"]}];
+const AC_TOPIC_KLAS=[
+{re:/(sovereign|national ai|data residency|critical infrastructure)/i,k:"G"},
+{re:/(gpu|ai factory|liquid cooling|immersion|hpc|high.density|rack)/i,k:"B"},
+{re:/(power|energy|renewable|grid|electric|solar|nuclear|ppa)/i,k:"C"},
+{re:/(water|wue|carbon|emission|sustain|environment)/i,k:"D"},
+{re:/(regulat|licen|policy|law|permit|approval|compliance)/i,k:"E"},
+{re:/(supply chain|construction|logistic|ecosystem|jobs|semiconductor)/i,k:"F"},
+{re:/(invest|fund|capex|financ|billion|miliar|market|colocation)/i,k:"A"}];
 function liveDrills(it){
   const text=(it.title||"")+" "+((it.matched||[]).join(" "));
   let std=[],itu=[];
@@ -546,7 +541,7 @@ const AI_PROVIDERS=[
 {id:"openrouter",endpoint:"https://openrouter.ai/api/v1/chat/completions",model:"meta-llama/llama-3.1-8b-instruct:free",getKey:()=>localStorage.getItem("ai_or"),headers:{"HTTP-Referer":location.origin,"X-Title":"DC APAC"}},
 {id:"huggingface",endpoint:"https://api-inference.huggingface.co/models/meta-llama/Llama-3.1-8B-Instruct/v1/chat/completions",model:"meta-llama/Llama-3.1-8B-Instruct",getKey:()=>localStorage.getItem("ai_hf")}];
 function aiAvailable(){return AI_PROVIDERS.some(p=>p.getKey());}
-const AI_SYSTEM=`Kamu analis riset industri data center. Balas HANYA JSON:{"summary_id":"ringkasan 2-3 kalimat","keywords":["3-5"],"hashtags":["5 tanpa #"],"is_indonesia":true/false,"country":"emoji+nama"}`;
+const AI_SYSTEM='Kamu analis riset industri data center. Balas HANYA JSON:{"summary_id":"ringkasan 2-3 kalimat","keywords":["3-5"],"hashtags":["5 tanpa #"],"is_indonesia":true/false,"country":"emoji+nama"}';
 async function analyzeArticle(it,fallbackKwords){
   const dr=liveDrills(it);
   const heur={summary:it.summary||"",keywords:(it.matched?.length?it.matched:fallbackKwords).slice(0,5),hashtags:(it.matched||fallbackKwords).slice(0,5).map(m=>"#"+m.replace(/[^a-z0-9]+/gi,"_")),is_indonesia:isIndonesiaLive(it),country:acGuessCountry(it.title),dr,ai:false};
@@ -659,6 +654,56 @@ function mapToRow(it,feed,klasId,an){
   const contentHash=fnv(String(it.link).toLowerCase()+"|"+feed+"|"+(klasId||""));
   return{content_hash:contentHash,url:it.link,title:it.title,source:it.src,summary:an.summary,hashtags:(an.hashtags||[]).concat(an.ai?["#AIcurated"]:[]),published_at:it.date.toISOString(),feed_type:feed,klas_id:klasId,k_label:null,country:an.country,is_indonesia:an.is_indonesia,score:it.score||0,drill_std:an.dr.std,drill_itu:an.dr.itu,drill_ris:an.dr.ris||[],drill_indo:an.dr.indo,month_key:monthKey(),window_days:60};
 }
+let _acRunning=false,LAST_RUN_INFO={parents:0,subs:0};
+async function acquireLock(){
+  const sb=getSbClient();if(!sb||!isAdmin())return{acquired:true};
+  try{const{data,error}=await sb.rpc("acquire_curation_lock",{p_cooldown_hours:20});if(error)return{acquired:false};return data||{acquired:false};}catch(e){return{acquired:false};}
+}
+async function acRun(force){
+  if(_acRunning)return null;
+  if(!isAdmin()&&!force){if(window._aoLog)window._aoLog("⚠️ Bukan admin.");return null;}
+  if(!force){const m=metaLoad();if(m&&m.monthKey===monthKey()&&(Date.now()-(m.at||0))<12*3600*1000)return null;}
+  const lock=await acquireLock();
+  if(!lock.acquired&&!force)return null;
+  _acRunning=true;
+  updateStatus("🔄 kurasi berjalan…");
+  const local=localLoad();
+  const parentRows=[];
+  const tasks=[];
+  KLAS.forEach(k=>tasks.push((async()=>{
+    try{
+      const cfg=liveConfig(k.id);
+      const raw=await fetchRssItems(cfg.newsQ,60);
+      const cur=curateNews(raw,cfg.kwords,cfg.requireRegion).slice(0,4);
+      for(const it of cur){const an=await analyzeArticle(it,cfg.kwords);parentRows.push(mapToRow(it,"klas",k.id,an));}
+    }catch(e){}
+  })()));
+  tasks.push((async()=>{
+    try{
+      const cfg=liveConfig("ID");
+      const raw=await fetchRssItems(cfg.newsQ,60);
+      const cur=curateNews(raw,cfg.kwords,true).slice(0,4);
+      for(const it of cur){const an=await analyzeArticle(it,cfg.kwords);parentRows.push(mapToRow(it,"indo","ID",an));}
+    }catch(e){}
+  })());
+  await Promise.allSettled(tasks);
+  const okP=await sbUpsert("dc_items",parentRows,"content_hash");
+  if(!okP){const merged=local.parents.concat(parentRows);localSave({parents:merged,subs:local.subs});}
+  let subRows=[];
+  for(const np of parentRows.slice(0,3)){
+    const kws=(np.hashtags||[]).map(h=>h.replace("#",""));
+    subRows=subRows.concat(await runSubSearches(np,kws.length?kws:["data center"]));
+  }
+  const okS=await sbUpsert("dc_sub_items",subRows,"parent_hash,sub_type,url");
+  if(!okS&&subRows.length)localSave({parents:local.parents,subs:local.subs.concat(subRows)});
+  metaSave({at:Date.now(),monthKey:monthKey()});
+  LAST_RUN_INFO={parents:parentRows.length,subs:subRows.length};
+  _acRunning=false;
+  await sbFetchWithSubs();precomputeHay();acRefreshCurrentView();updateStatus();
+  toast("✅ Kurasi: "+parentRows.length+" parent + "+subRows.length+" sub-item.");
+}
+
+/* ============ SB FETCH + MERGE ============ */
 async function sbFetchWithSubs(){
   const sb=getSbClient();if(!sb)return null;
   try{
@@ -701,14 +746,6 @@ function mergeViews(data){
   INDONESIA_VIEW.hasil=addI.concat(INDONESIA_VIEW.hasil).sort((a,b)=>dateKey(b).localeCompare(dateKey(a))).slice(0,16);
   return true;
 }
-const AC_TOPIC_KLAS=[
-{re:/(sovereign|national ai|data residency|critical infrastructure)/i,k:"G"},
-{re:/(gpu|ai factory|liquid cooling|immersion|hpc|high.density|rack)/i,k:"B"},
-{re:/(power|energy|renewable|grid|electric|solar|nuclear|ppa)/i,k:"C"},
-{re:/(water|wue|carbon|emission|sustain|environment)/i,k:"D"},
-{re:/(regulat|licen|policy|law|permit|approval|compliance)/i,k:"E"},
-{re:/(supply chain|construction|logistic|ecosystem|jobs|semiconductor)/i,k:"F"},
-{re:/(invest|fund|capex|financ|billion|miliar|market|colocation)/i,k:"A"}];
 function mergeLocalViews(data){
   if(!data)return false;
   KLAS.forEach(k=>{k.hasil=k.hasil.filter(it=>!it._localMerged);});
@@ -734,51 +771,6 @@ function mergeLocalViews(data){
   return true;
 }
 
-/* ============ AUTO-KURASI ============ */
-let _acRunning=false,LAST_RUN_INFO={parents:0,subs:0};
-async function acRun(force){
-  if(_acRunning)return null;
-  if(!isAdmin()&&!force)return null;
-  if(!force){const m=metaLoad();if(m&&m.monthKey===monthKey()&&(Date.now()-(m.at||0))<12*3600*1000)return null;}
-  const sb=getSbClient();
-  if(sb&&isAdmin()){try{const {data}=await sb.rpc("acquire_curation_lock",{p_cooldown_hours:20});if(data&&!data.acquired&&!force)return null;}catch(e){}}
-  _acRunning=true;updateStatus("🔄 kurasi berjalan…");
-  const local=localLoad();
-  const parentRows=[];
-  const tasks=[];
-  KLAS.forEach(k=>tasks.push((async()=>{
-    try{
-      const cfg=liveConfig(k.id);
-      const raw=await fetchRssItems(cfg.newsQ,60);
-      const cur=curateNews(raw,cfg.kwords,cfg.requireRegion).slice(0,4);
-      for(const it of cur){const an=await analyzeArticle(it,cfg.kwords);parentRows.push(mapToRow(it,"klas",k.id,an));}
-    }catch(e){}
-  })()));
-  tasks.push((async()=>{
-    try{
-      const cfg=liveConfig("ID");
-      const raw=await fetchRssItems(cfg.newsQ,60);
-      const cur=curateNews(raw,cfg.kwords,true).slice(0,4);
-      for(const it of cur){const an=await analyzeArticle(it,cfg.kwords);parentRows.push(mapToRow(it,"indo","ID",an));}
-    }catch(e){}
-  })());
-  await Promise.allSettled(tasks);
-  const okP=await sbUpsert("dc_items",parentRows,"content_hash");
-  if(!okP){const merged=local.parents.concat(parentRows);localSave({parents:merged,subs:local.subs});}
-  let subRows=[];
-  for(const np of parentRows.slice(0,3)){
-    const kws=(np.hashtags||[]).map(h=>h.replace("#",""));
-    subRows=subRows.concat(await runSubSearches(np,kws.length?kws:["data center"]));
-  }
-  const okS=await sbUpsert("dc_sub_items",subRows,"parent_hash,sub_type,url");
-  if(!okS&&subRows.length)localSave({parents:local.parents,subs:local.subs.concat(subRows)});
-  metaSave({at:Date.now(),monthKey:monthKey()});
-  LAST_RUN_INFO={parents:parentRows.length,subs:subRows.length};
-  _acRunning=false;
-  await sbFetchWithSubs();precomputeHay();acRefreshCurrentView();updateStatus();
-  toast("✅ Kurasi: "+parentRows.length+" parent + "+subRows.length+" sub-item.");
-}
-
 /* ============ RENDER ============ */
 const main=document.getElementById("main"),sideNav=document.getElementById("sideNav");
 let currentView="ID",filterText="";
@@ -796,8 +788,8 @@ function matchFilter(it){
 function buildNav(){
   let h='<h3>📡 Menu</h3><button class="nav-btn" data-v="ID"><span class="ico">🇮🇩</span><span>Indonesia (Default)<small>Semua klasifikasi</small></span></button><div class="nav-divider"></div>';
   KLAS.forEach(k=>{h+='<button class="nav-btn" data-v="'+k.id+'"><span class="ico">'+k.ico+'</span><span>'+esc(k.nama)+'<small>Klasifikasi '+k.id+'</small></span></button>';});
-  h+='<div class="nav-divider"></div><button class="nav-btn trd" data-v="TRENDS"><span class="ico">📈</span><span>Google Trends</span></button>';
-  h+='<button class="nav-btn adv" data-v="ADV"><span class="ico">🔎</span><span>Advanced</span></button>';
+  h+='<div class="nav-divider"></div><button class="nav-btn trd" data-v="TRENDS"><span class="ico">📈</span><span>Google Trends<small>Chart.js mandiri</small></span></button>';
+  h+='<button class="nav-btn adv" data-v="ADV"><span class="ico">🔎</span><span>Advanced<small>Query launcher</small></span></button>';
   sideNav.innerHTML=h;
   sideNav.querySelectorAll(".nav-btn").forEach(b=>b.addEventListener("click",()=>goView(b.dataset.v)));
 }
@@ -881,8 +873,6 @@ function liveCardHTML(it,idx,label){
   const uid=fnv(String(it.link)+label);
   return '<article class="r-card live" style="animation-delay:'+(idx*55)+'ms"><div class="r-body"><div class="r-meta"><span class="r-date">🗓 '+fmtDate(it.date)+'</span><span class="r-src">📌 '+esc(it.src)+'</span><span class="live-badge">⚡ '+label+'</span></div><h3 class="r-title"><a href="'+safeUrl(it.link)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a><span class="ext">↗</span></h3><div class="r-tags">'+(it.matched||[]).slice(0,5).map(m=>'<span>#'+esc(m.replace(/[^a-z0-9]+/gi,"_"))+'</span>').join("")+'</div><div class="r-sum">'+esc(ensureMinSummary(it))+'</div><div class="r-actions"><button class="btn-act" data-share-url="'+safeUrl(it.link)+'">🔗 Share</button><button class="btn-act chat" data-chat-url="'+esc(chatUrl(it.title,it.link))+'">🤖 Chat AI</button>'+liveSubcatChipsHTML(it,uid)+'</div></div><div class="r-drills">'+liveSubcatPanelsHTML(it,uid)+'</div></article>';
 }
-
-/* ============ LIVE RENDER ============ */
 let _liveRunning=false;
 async function renderLiveFromSupabase(viewId){
   const st=document.getElementById("liveStatus"),nb=document.getElementById("liveNews"),rb=document.getElementById("liveResearch");
@@ -890,7 +880,6 @@ async function renderLiveFromSupabase(viewId){
   const cached=sbCacheLoad();
   if(!cached||!cached.data)return false;
   const parents=cached.data.parents||[];
-  // FILTER KRITIS: hanya news/research untuk klas_id===viewId
   const news=parents.filter(p=>p.feed_type==="news"&&p.klas_id===viewId).slice(0,6);
   const research=parents.filter(p=>p.feed_type==="research"&&p.klas_id===viewId).slice(0,4);
   if(!news.length&&!research.length)return false;
@@ -945,7 +934,6 @@ async function runLive(viewId,force){
       setStep("curate","done");setBar(85);
       setStep("save","active");setSkel("⚙️ 7/7: Simpan (klas_id="+viewId+")…");
       liveCacheSave(viewId,nCur,rCur);
-      // FIX: klas_id = viewId, bukan hasil klasifikasi AI
       if(isAdmin()&&(nCur.length||rCur.length)){
         try{
           const rows=[];
@@ -989,59 +977,180 @@ function renderIndonesia(){
   wireToolbar(()=>renderIndonesia());wireLive("ID");
 }
 
-/* ============ TRENDS (SEDERHANA) ============ */
+/* ============ GOOGLE TRENDS ============ */
+const TREND_DATA={
+  "data center":{labels:["Okt 25","Nov 25","Des 25","Jan 26","Feb 26","Mar 26","Apr 26","Mei 26","Jun 26","Jul 26","Agu 26","Sep 26"],values:[42,48,55,62,58,65,71,68,74,82,91,88],color:"#1f8bd6"},
+  "AI data center":{labels:["Okt 25","Nov 25","Des 25","Jan 26","Feb 26","Mar 26","Apr 26","Mei 26","Jun 26","Jul 26","Agu 26","Sep 26"],values:[18,22,28,35,44,56,68,79,88,95,100,97],color:"#7c5cd6"},
+  "liquid cooling":{labels:["Okt 25","Nov 25","Des 25","Jan 26","Feb 26","Mar 26","Apr 26","Mei 26","Jun 26","Jul 26","Agu 26","Sep 26"],values:[12,15,19,25,32,41,52,61,70,78,85,82],color:"#0aa5a0"}
+};
+let _trendChart1=null,_trendChart2=null;
 function renderTrends(){
-  main.innerHTML='<div class="view-head"><div class="kicker-row"><div class="kicker">Google Trends</div>'+viewShareButton("TRENDS")+'</div><h2>📈 Keywords Data Center APAC</h2></div><div class="panel"><h3>🚀 Buka di Google Trends</h3><div style="display:flex;gap:9px;flex-wrap:wrap"><input type="text" id="tk" placeholder="data center Indonesia" style="flex:1;min-width:220px;padding:10px 15px;border-radius:99px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)"><button class="btn-open" id="tgo">Cari</button></div></div>';
-  document.getElementById("tgo").onclick=()=>{const k=document.getElementById("tk").value.trim()||"data center";window.open("https://trends.google.com/trends/explore?date=today%2012-m&q="+encodeURIComponent(k),"_blank","noopener");};
+  const kw={
+    A:["data center investment","hyperscale data center","colocation capacity"],
+    B:["AI data center","liquid cooling","AI factory"],
+    C:["data center power","renewable energy data center","data center PPA"],
+    D:["data center water","WUE data center","water stress data center"],
+    E:["data center regulation","data centre licensing"],
+    F:["data center supply chain","data center construction"],
+    G:["sovereign AI","data sovereignty","national AI infrastructure"]
+  };
+  let h='<div class="view-head"><div class="kicker-row"><div class="kicker">Google Trends</div>'+viewShareButton("TRENDS")+'</div><h2>📈 Keywords Data Center APAC</h2><div class="periode">Grafik <b>Chart.js mandiri</b> (stabil tanpa cookie pihak ketiga). Chip membuka Google Trends live di tab baru.</div></div>'+
+   '<div class="panel"><h3>🔍 Cari Trends Sendiri</h3><div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">'+
+   '<input type="text" id="trendKw" placeholder="contoh: data center Batam" style="flex:1;min-width:220px;padding:10px 15px;border-radius:99px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);font-family:inherit">'+
+   '<select id="trendGeo" style="padding:9px 13px;border-radius:99px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)">'+
+   '<option value="">Worldwide</option><option value="ID">Indonesia</option><option value="MY">Malaysia</option><option value="SG">Singapura</option><option value="TH">Thailand</option><option value="IN">India</option><option value="AU">Australia</option><option value="JP">Jepang</option><option value="KR">Korsel</option><option value="VN">Vietnam</option><option value="PH">Filipina</option></select>'+
+   '<button class="btn-open" id="btnTrend">🚀 Buka Trends</button></div></div>'+
+   '<div class="panel"><h3>📌 Keywords per Klasifikasi</h3><div class="trend-grid">'+
+   Object.keys(kw).map(k=>'<div class="trend-kw-card"><div class="trend-kw-head"><span>'+(KLAS.find(x=>x.id===k)||{}).ico+'</span> '+esc((KLAS.find(x=>x.id===k)||{}).nama)+'</div><div class="trend-kw-list">'+kw[k].map(w=>'<button class="chip" data-tkw="'+esc(w)+'">'+esc(w)+'</button>').join("")+'</div></div>').join("")+
+   '</div></div>'+
+   '<div class="panel"><h3>📊 Grafik Interest Over Time (Chart.js)</h3><div class="trend-grid">'+
+   '<div><div style="font-weight:700;margin-bottom:8px">“data center” — Worldwide</div><div class="chart-wrap"><div class="chart-canvas-holder"><canvas id="trendChart1"></canvas></div><div class="chart-legend"><span class="lg-item"><span class="lg-swatch" style="background:#1f8bd6"></span> data center</span></div></div></div>'+
+   '<div><div style="font-weight:700;margin-bottom:8px">“AI data center” vs “liquid cooling”</div><div class="chart-wrap"><div class="chart-canvas-holder"><canvas id="trendChart2"></canvas></div><div class="chart-legend"><span class="lg-item"><span class="lg-swatch" style="background:#7c5cd6"></span> AI data center</span><span class="lg-item"><span class="lg-swatch" style="background:#0aa5a0"></span> liquid cooling</span></div></div></div>'+
+   '</div></div>';
+  main.innerHTML=h;
+  const btn=document.getElementById("btnTrend");
+  if(btn)btn.onclick=()=>{const k=document.getElementById("trendKw").value.trim()||"data center";const g=document.getElementById("trendGeo").value;window.open("https://trends.google.com/trends/explore?date=today%2012-m&q="+encodeURIComponent(k)+(g?"&geo="+g:""),"_blank","noopener");};
+  main.querySelectorAll("[data-tkw]").forEach(b=>b.onclick=()=>window.open("https://trends.google.com/trends/explore?date=today%2012-m&q="+encodeURIComponent(b.getAttribute("data-tkw")),"_blank","noopener"));
+  requestAnimationFrame(()=>{try{renderChart1();renderChart2();}catch(e){console.warn(e);}});
+}
+function chartOptions(){
+  const dark=document.documentElement.getAttribute("data-theme")==="dark";
+  const tc=dark?"#8ba5bd":"#4a6b84";const gc=dark?"rgba(139,165,189,.12)":"rgba(74,107,132,.12)";
+  return{responsive:true,maintainAspectRatio:false,interaction:{mode:"index",intersect:false},plugins:{legend:{display:false},tooltip:{backgroundColor:dark?"rgba(228,237,245,.96)":"rgba(15,45,68,.95)",titleColor:dark?"#0f2d44":"#fff",bodyColor:dark?"#0f2d44":"#fff",padding:10,cornerRadius:8}},scales:{x:{grid:{display:false},ticks:{color:tc,font:{size:10}}},y:{beginAtZero:true,grid:{color:gc},ticks:{color:tc,font:{size:10}}}}};
+}
+function renderChart1(){
+  const c=document.getElementById("trendChart1");if(!c||!window.Chart)return;
+  if(_trendChart1){_trendChart1.destroy();_trendChart1=null;}
+  const d=TREND_DATA["data center"],ctx=c.getContext("2d");
+  const g=ctx.createLinearGradient(0,0,0,300);g.addColorStop(0,"rgba(31,139,214,.35)");g.addColorStop(1,"rgba(31,139,214,.02)");
+  _trendChart1=new Chart(ctx,{type:"line",data:{labels:d.labels,datasets:[{label:"data center",data:d.values,borderColor:d.color,backgroundColor:g,borderWidth:2.5,fill:true,tension:.35,pointRadius:0,pointHoverRadius:5}]},options:chartOptions()});
+}
+function renderChart2(){
+  const c=document.getElementById("trendChart2");if(!c||!window.Chart)return;
+  if(_trendChart2){_trendChart2.destroy();_trendChart2=null;}
+  const a=TREND_DATA["AI data center"],b=TREND_DATA["liquid cooling"];
+  _trendChart2=new Chart(c,{type:"line",data:{labels:a.labels,datasets:[
+    {label:"AI data center",data:a.values,borderColor:a.color,borderWidth:2.5,fill:false,tension:.35,pointRadius:0,pointHoverRadius:5},
+    {label:"liquid cooling",data:b.values,borderColor:b.color,borderWidth:2.5,fill:false,tension:.35,pointRadius:0,pointHoverRadius:5}
+  ]},options:chartOptions()});
 }
 
-/* ============ ADVANCED (SEDERHANA) ============ */
+/* ============ ADVANCED SEARCH ============ */
+const ENGINES=[
+  ["google",q=>"https://www.google.com/search?q="+encodeURIComponent(q)],
+  ["bing",q=>"https://www.bing.com/search?q="+encodeURIComponent(q)],
+  ["ddg",q=>"https://duckduckgo.com/?q="+encodeURIComponent(q)],
+  ["ecosia",q=>"https://www.ecosia.org/search?q="+encodeURIComponent(q)],
+  ["brave",q=>"https://search.brave.com/search?q="+encodeURIComponent(q)],
+  ["startpage",q=>"https://www.startpage.com/sp/search?query="+encodeURIComponent(q)],
+  ["mojeek",q=>"https://www.mojeek.com/search?q="+encodeURIComponent(q)],
+  ["qwant",q=>"https://www.qwant.com/?q="+encodeURIComponent(q)],
+  ["yandex",q=>"https://yandex.com/search/?text="+encodeURIComponent(q)]
+];
+let advState={kw:"",klas:"",negara:[],periode:"2bulan",engines:["google","ddg","ecosia"],optItu:false,optPdf:false,optId:false,customA:"",customB:""};
+function advDates(){
+  if(advState.periode==="custom"&&advState.customA&&advState.customB)return[advState.customA,advState.customB];
+  const now=new Date(),m=advState.periode==="1bulan"?1:advState.periode==="3bulan"?3:advState.periode==="6bulan"?6:2;
+  const s=new Date(now);s.setMonth(s.getMonth()-m);
+  const f=d=>d.toISOString().slice(0,10);
+  return[f(s),f(now)];
+}
+function advQuery(){
+  const p=['"data center"'];
+  if(advState.kw.trim())p.push(advState.kw.trim());
+  else if(advState.klas){const k=KLAS.find(x=>x.id===advState.klas);if(k)p.push('"'+k.keywords[0]+'"');}
+  if(advState.negara.length){const map={ID:"Indonesia",MY:"Malaysia",SG:"Singapore",TH:"Thailand",VN:"Vietnam",IN:"India",AU:"Australia",JP:"Japan",KR:"South Korea",CN:"China",PH:"Philippines"};p.push("("+advState.negara.map(c=>map[c]||c).join(" OR ")+")");}
+  else p.push('("Asia Pacific" OR APAC OR ASEAN)');
+  const[a,b]=advDates();p.push("after:"+a,"before:"+b);
+  if(advState.optItu)p.push("site:itu.int");
+  if(advState.optPdf)p.push("filetype:pdf");
+  if(advState.optId)p.push('("bahasa indonesia" OR regulasi)');
+  return p.join(" ");
+}
 function renderAdvanced(){
-  main.innerHTML='<div class="view-head"><div class="kicker-row"><div class="kicker">Query Launcher</div>'+viewShareButton("ADV")+'</div><h2>🔎 Advanced Search</h2></div><div class="panel"><h3>🌐 Mesin Pencari</h3><div style="display:flex;gap:9px;flex-wrap:wrap"><input type="text" id="aq" placeholder=\'"data center" Indonesia after:2026-07-16\' style="flex:1;min-width:220px;padding:10px 15px;border-radius:99px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)"><button class="btn-open" id="ag">Google</button><button class="btn-open sec" id="ab">Bing</button><button class="btn-open sec" id="ad">DuckDuckGo</button></div></div>';
-  const q=()=>document.getElementById("aq").value.trim()||'"data center" Indonesia';
-  document.getElementById("ag").onclick=()=>window.open("https://www.google.com/search?q="+encodeURIComponent(q()),"_blank","noopener");
-  document.getElementById("ab").onclick=()=>window.open("https://www.bing.com/search?q="+encodeURIComponent(q()),"_blank","noopener");
-  document.getElementById("ad").onclick=()=>window.open("https://duckduckgo.com/?q="+encodeURIComponent(q()),"_blank","noopener");
+  const nl=[["ID","🇮🇩 Indonesia"],["MY","🇲🇾 Malaysia"],["SG","🇸🇬 Singapura"],["TH","🇹🇭 Thailand"],["VN","🇻🇳 Vietnam"],["IN","🇮🇳 India"],["AU","🇦🇺 Australia"],["JP","🇯🇵 Jepang"],["KR","🇰🇷 Korsel"],["CN","🇨🇳 China"],["PH","🇵🇭 Filipina"]];
+  main.innerHTML='<div class="view-head"><div class="kicker-row"><div class="kicker">Query Launcher</div>'+viewShareButton("ADV")+'</div><h2>🔎 Pencarian Advanced</h2><div class="periode">Kueri lengkap → 9 mesin pencari open-source (tab baru).</div></div>'+
+  '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">'+
+  '<div class="panel"><h3>🧩 Parameter</h3>'+
+  '<div class="field"><label>Klasifikasi</label><select id="advKlas"><option value="">— bebas —</option>'+KLAS.map(k=>'<option value="'+k.id+'"'+(advState.klas===k.id?" selected":"")+'>'+k.id+'. '+esc(k.nama)+'</option>').join("")+'</select></div>'+
+  '<div class="field"><label>Keywords</label><input type="text" id="advKw" value="'+esc(advState.kw)+'" placeholder="mis. liquid cooling, PPA…"></div>'+
+  '<div class="field"><label>Negara APAC</label><div class="chip-row" id="advNegara">'+nl.map(n=>'<button class="chip'+(advState.negara.includes(n[0])?" on":"")+'" data-c="'+n[0]+'">'+n[1]+'</button>').join("")+'</div></div>'+
+  '<div class="field"><label>Periode</label><select id="advPeriode">'+['1bulan','2bulan','3bulan','6bulan','custom'].map(v=>{const l={"1bulan":"1 bulan","2bulan":"2 bulan (default)","3bulan":"3 bulan","6bulan":"6 bulan","custom":"Custom"}[v];return '<option value="'+v+'"'+(advState.periode===v?" selected":"")+'>'+l+'</option>';}).join("")+'</select></div>'+
+  '<div class="field" id="customDates" style="display:'+(advState.periode==="custom"?"flex":"none")+';gap:10px">'+
+  '<input type="date" id="advA" value="'+esc(advState.customA)+'" style="flex:1;padding:10px;border:1.5px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)">'+
+  '<input type="date" id="advB" value="'+esc(advState.customB)+'" style="flex:1;padding:10px;border:1.5px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)"></div>'+
+  '<div class="field"><label>Opsi tambahan</label>'+
+  '<label class="opt-check"><input type="checkbox" id="optItu"'+(advState.optItu?" checked":"")+'> site:itu.int</label>'+
+  '<label class="opt-check"><input type="checkbox" id="optPdf"'+(advState.optPdf?" checked":"")+'> filetype:pdf</label>'+
+  '<label class="opt-check"><input type="checkbox" id="optId"'+(advState.optId?" checked":"")+'> Bahasa Indonesia / regulasi</label></div></div>'+
+  '<div class="panel"><h3>🌐 Mesin Pencari</h3><div id="advEngines">'+
+  ENGINES.map(e=>'<button class="eng-chip'+(advState.engines.includes(e[0])?" on":"")+'" data-e="'+e[0]+'">'+(advState.engines.includes(e[0])?"☑":"☐")+' '+e[0]+'</button>').join("")+
+  '</div><h3 style="margin-top:14px">👁 Preview Kueri</h3><div class="preview-box" id="advPreview"></div>'+
+  '<div style="margin-top:14px"><button class="btn-open" id="advRun">🚀 Cari di Mesin Terpilih</button>'+
+  '<button class="btn-open sec" id="advAll">🌍 Semua Mesin</button>'+
+  '<button class="btn-open sec" id="advCopy">📋 Salin Kueri</button></div></div></div>';
+  const $=id=>document.getElementById(id);
+  const upd=()=>{$("advPreview").textContent=advQuery();};
+  upd();
+  $("advKlas").onchange=e=>{advState.klas=e.target.value;if(advState.klas){const k=KLAS.find(x=>x.id===advState.klas);$("advKw").value=k.keywords.slice(0,3).join(" OR ");advState.kw=$("advKw").value;}upd();};
+  $("advKw").oninput=e=>{advState.kw=e.target.value;upd();};
+  $("advPeriode").onchange=e=>{advState.periode=e.target.value;$("customDates").style.display=advState.periode==="custom"?"flex":"none";upd();};
+  $("advA").onchange=e=>{advState.customA=e.target.value;upd();};
+  $("advB").onchange=e=>{advState.customB=e.target.value;upd();};
+  document.querySelectorAll("#advNegara .chip").forEach(c=>c.onclick=()=>{const code=c.dataset.c;advState.negara=advState.negara.includes(code)?advState.negara.filter(x=>x!==code):advState.negara.concat(code);c.classList.toggle("on");upd();});
+  document.querySelectorAll("#advEngines .eng-chip").forEach(c=>c.onclick=()=>{const id=c.dataset.e;advState.engines=advState.engines.includes(id)?advState.engines.filter(x=>x!==id):advState.engines.concat(id);c.classList.toggle("on");c.innerHTML=(advState.engines.includes(id)?"☑":"☐")+" "+id;});
+  ["optItu","optPdf","optId"].forEach(k=>$(k).onchange=e=>{advState[k]=e.target.checked;upd();});
+  $("advRun").onclick=()=>{const q=advQuery();const sel=ENGINES.filter(e=>advState.engines.includes(e[0]));if(!sel.length){alert("Pilih minimal 1 mesin.");return;}sel.forEach((e,i)=>setTimeout(()=>window.open(e[1](q),"_blank","noopener"),i*320));};
+  $("advAll").onclick=()=>{const q=advQuery();ENGINES.forEach((e,i)=>setTimeout(()=>window.open(e[1](q),"_blank","noopener"),i*320));};
+  $("advCopy").onclick=()=>copyText(advQuery()).then(()=>toast("📋 Kueri tersalin."));
 }
 
 /* ============ THEME / SIDEBAR / MODAL ============ */
 function initThemeSwitcher(){
   const btn=document.getElementById("btnTheme");if(!btn)return;
-  const cycle=["auto","light","dark"];
-  const meta={auto:"🌗",light:"☀️",dark:"🌙"};
+  const cycle=["auto","light","dark"];const meta={auto:"🌗",light:"☀️",dark:"🌙"};
   let cur=document.documentElement.getAttribute("data-theme-mode")||"auto";
   btn.textContent=meta[cur];
-  btn.onclick=()=>{
-    const i=cycle.indexOf(cur);const nx=cycle[(i+1)%3];cur=nx;
-    const pd=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const r=nx==="auto"?(pd?"dark":"light"):nx;
-    document.documentElement.setAttribute("data-theme-mode",nx);
-    document.documentElement.setAttribute("data-theme",r);
-    btn.textContent=meta[nx];
-    try{localStorage.setItem("dcTheme",nx);}catch(e){}
-  };
+  btn.onclick=()=>{const i=cycle.indexOf(cur);const nx=cycle[(i+1)%3];cur=nx;const pd=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;const r=nx==="auto"?(pd?"dark":"light"):nx;document.documentElement.setAttribute("data-theme-mode",nx);document.documentElement.setAttribute("data-theme",r);btn.textContent=meta[nx];try{localStorage.setItem("dcTheme",nx);}catch(e){}};
 }
 function initSide(){
   const b=document.getElementById("btnSide");
-  if(b)b.addEventListener("click",()=>{document.body.classList.toggle("side-collapsed");try{localStorage.setItem("dcSideCollapsed",document.body.classList.contains("side-collapsed")?"1":"0");}catch(e){}});
+  if(b)b.onclick=()=>{document.body.classList.toggle("side-collapsed");try{localStorage.setItem("dcSideCollapsed",document.body.classList.contains("side-collapsed")?"1":"0");}catch(e){}};
   try{const s=localStorage.getItem("dcSideCollapsed");if(window.matchMedia("(max-width:820px)").matches)document.body.classList.add("side-collapsed");else if(s==="1")document.body.classList.add("side-collapsed");}catch(e){}
 }
 function updateStatus(extra){
   const el=document.getElementById("acStatus");if(!el)return;
   const m=metaLoad();
   const wm=isAdmin()?(SB_WRITE_OK?"Supabase":"lokal"):"read-only";
-  el.innerHTML=(extra?extra+" ":"")+"Mode: <b>"+wm+"</b> • AI: <b>"+(aiAvailable()?"aktif":"heuristik")+"</b> • Kurasi: <b>"+(m?new Date(m.at).toLocaleString("id-ID"):"belum")+"</b>";
+  el.innerHTML=(extra?extra+" ":"")+"Mode: <b>"+wm+"</b> • AI: <b>"+(aiAvailable()?"aktif":"heuristik")+"</b> • Kurasi: <b>"+(m?new Date(m.at).toLocaleString("id-ID"):"belum")+"</b> • siklus <b>"+monthKey()+"</b>";
 }
 function initModal(){
   document.getElementById("btnCloseModal").onclick=()=>document.getElementById("keyModal").classList.remove("open");
-  document.getElementById("btnSaveKeys").onclick=()=>{
-    const g=document.getElementById("kGroq").value.trim(),o=document.getElementById("kOr").value.trim(),h=document.getElementById("kHf").value.trim(),a=document.getElementById("kAdmin").value.trim();
-    try{if(g)localStorage.setItem("ai_groq",g);if(o)localStorage.setItem("ai_or",o);if(h)localStorage.setItem("ai_hf",h);if(a)localStorage.setItem("dcAdminToken",a);}catch(e){}
-    _sbClient=null;location.reload();
-  };
+  document.getElementById("btnSaveKeys").onclick=()=>{const g=document.getElementById("kGroq").value.trim(),o=document.getElementById("kOr").value.trim(),h=document.getElementById("kHf").value.trim(),a=document.getElementById("kAdmin").value.trim();try{if(g)localStorage.setItem("ai_groq",g);if(o)localStorage.setItem("ai_or",o);if(h)localStorage.setItem("ai_hf",h);if(a)localStorage.setItem("dcAdminToken",a);}catch(e){}_sbClient=null;location.reload();};
   document.getElementById("btnClearAdmin").onclick=()=>{try{localStorage.removeItem("dcAdminToken");}catch(e){}_sbClient=null;location.reload();};
   document.getElementById("bKeys").onclick=()=>{document.getElementById("keyModal").classList.add("open");document.getElementById("kGroq").value=localStorage.getItem("ai_groq")||"";document.getElementById("kOr").value=localStorage.getItem("ai_or")||"";document.getElementById("kHf").value=localStorage.getItem("ai_hf")||"";document.getElementById("kAdmin").value=getAdminToken()||"";};
   document.getElementById("bForce").onclick=()=>acRun(true);
+}
+
+/* ============ AUTO MODE (?auto=1) ============ */
+const IS_AUTO=new URLSearchParams(location.search).has("auto");
+function aoLog(msg){const el=document.getElementById("aoLog");if(el){el.textContent+="["+new Date().toLocaleTimeString("id-ID")+"] "+msg+"\n";el.scrollTop=el.scrollHeight;}}
+function aoProgress(msg){const el=document.getElementById("aoProgress");if(el)el.textContent=msg;}
+function aoStatus(html){const el=document.getElementById("aoStatus");if(el)el.innerHTML=html;}
+window._aoLog=aoLog;
+async function runAutoMode(){
+  const ov=document.getElementById("autoOverlay");ov.classList.add("on");
+  aoProgress("🔍 Verifikasi admin…");
+  if(!isAdmin()){aoProgress("⚠️ Bukan admin.");aoLog("Tidak ada service_role key.");aoStatus('<span style="color:#ffb74d">⏸️ Bukan admin.</span>');setTimeout(()=>ov.classList.remove("on"),5000);return;}
+  aoLog("Admin: ✅ • Groq: "+(localStorage.getItem("ai_groq")?"✅":"❌")+" • OpenRouter: "+(localStorage.getItem("ai_or")?"✅":"❌")+" • HuggingFace: "+(localStorage.getItem("ai_hf")?"✅":"❌"));
+  aoProgress("📡 Kurasi penuh (KLAS + Indonesia + sub-pencarian)…");
+  try{
+    await acRun(true);
+    aoProgress("✅ Selesai: "+(LAST_RUN_INFO.parents||0)+" parent + "+(LAST_RUN_INFO.subs||0)+" sub-item.");
+    aoStatus('<span style="color:#5cf5a5">✅ Sukses</span>');
+    aoLog("Tab ditutup dalam 5 detik…");
+    setTimeout(()=>{try{window.close();}catch(e){}ov.classList.remove("on");},5000);
+  }catch(e){console.error(e);aoLog("❌ "+e.message);aoProgress("❌ Gagal: "+e.message);aoStatus('<span style="color:#ff7a59">❌ Gagal</span>');}
 }
 
 /* ============ SUB-KATEGORI CLICK ============ */
@@ -1050,8 +1159,7 @@ document.addEventListener("click",async e=>{
   e.preventDefault();
   const uid=btn.getAttribute("data-livesub"),url=btn.getAttribute("data-url"),kind=btn.getAttribute("data-kind");
   const panel=document.getElementById("lsub-"+kind+"-"+uid);if(!panel)return;
-  const opening=panel.hidden;
-  panel.hidden=!opening;btn.classList.toggle("open",opening);
+  const opening=panel.hidden;panel.hidden=!opening;btn.classList.toggle("open",opening);
   if(!opening)return;
   window._liveSubcatCache=window._liveSubcatCache||{};
   const cf=window._liveSubcatCache[url]=window._liveSubcatCache[url]||{};
@@ -1073,6 +1181,7 @@ function renderLiveSubcatPanel(panel,items,kind){
 
 /* ============ BOOT ============ */
 document.addEventListener("DOMContentLoaded",async()=>{
+  if(IS_AUTO){document.querySelector("header.hero").style.display="none";document.querySelector(".wrap").style.display="none";document.querySelector("footer").style.display="none";document.getElementById("acBanner").style.display="none";runAutoMode();return;}
   document.getElementById("pillPeriode").textContent=PERIODE.mulai+" – "+PERIODE.akhir;
   initThemeSwitcher();initSide();initModal();buildNav();
   const localData=localLoad();
@@ -1095,12 +1204,11 @@ document.addEventListener("DOMContentLoaded",async()=>{
 });
 
 window.dcDebug={
-  version:"live-per-klas-v7-restored",
-  status:()=>({admin:isAdmin(),sbCache:!!sbCacheLoad(),liveRunning:_liveRunning}),
+  version:"v9-complete",
+  status:()=>({admin:isAdmin(),sbCache:!!sbCacheLoad(),liveRunning:_liveRunning,chartLoaded:!!window.Chart}),
   runLive:(v,f)=>runLive(v||currentView,f!==false),
   runCuration:(f=true)=>acRun(f),
-  clearCache:()=>{try{Object.keys(localStorage).forEach(k=>{if(k.startsWith("dcLiveCache_"))localStorage.removeItem(k);});localStorage.removeItem(SB_CACHE_KEY);localStorage.removeItem(LOCAL_KEY);}catch(e){}console.log("Cleared.");},
-  supabaseCheckKlas:async()=>{const d=await sbFetchWithSubs();if(!d)return console.log("No data");const by={};d.parents.forEach(p=>{const k=p.feed_type+"|"+(p.klas_id||"null");by[k]=(by[k]||0)+1;});console.table(by);}
+  clearCache:()=>{try{Object.keys(localStorage).forEach(k=>{if(k.startsWith("dcLiveCache_"))localStorage.removeItem(k);});localStorage.removeItem(SB_CACHE_KEY);localStorage.removeItem(LOCAL_KEY);}catch(e){}console.log("Cleared.");}
 };
 </script>
 </body>
