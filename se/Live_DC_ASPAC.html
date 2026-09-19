@@ -279,10 +279,67 @@ footer b{color:var(--ink)}
   .chart-canvas-holder{height:240px}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* === Live Loading Progress Tracker === */
+.live-loader{
+  padding:16px 18px;
+  background:linear-gradient(135deg,rgba(31,139,214,.06),rgba(10,165,160,.06));
+  border:1px dashed var(--line);
+  border-radius:12px;
+  margin:4px 0;
+}
+.ll-head{
+  display:flex;justify-content:space-between;align-items:center;
+  gap:10px;flex-wrap:wrap;margin-bottom:12px;
+}
+.ll-title{
+  font-weight:800;font-size:.86rem;color:var(--ink);
+  display:flex;align-items:center;gap:8px;
+}
+.ll-timer{
+  font-family:ui-monospace,monospace;font-size:.78rem;font-weight:800;
+  color:var(--sky);background:var(--bg);padding:3px 10px;border-radius:99px;
+  border:1px solid var(--line);
+}
+.ll-steps{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.ll-step{
+  display:flex;align-items:center;gap:9px;
+  font-size:.78rem;color:var(--ink-soft);
+  padding:5px 8px;border-radius:8px;
+  transition:all .25s;
+}
+.ll-step.done{color:var(--green)}
+.ll-step.done .ll-ico::before{content:"✅"}
+.ll-step.active{background:rgba(31,139,214,.10);color:var(--sky);font-weight:700}
+.ll-step.active .ll-ico{animation:llspin 1s linear infinite}
+.ll-step.fail{color:var(--coral);opacity:.7}
+.ll-step.fail .ll-ico::before{content:"⚠️"}
+.ll-ico{
+  font-size:.95rem;width:18px;text-align:center;display:inline-block;
+}
+.ll-ico::before{content:"⏳"}
+@keyframes llspin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+.ll-bar{
+  height:4px;background:var(--line);border-radius:99px;overflow:hidden;
+  margin-bottom:8px;
+}
+.ll-bar-fill{
+  height:100%;background:linear-gradient(90deg,var(--teal),var(--sky));
+  transition:width .4s ease;border-radius:99px;
+}
+.ll-eta{
+  font-size:.72rem;color:var(--ink-soft);text-align:center;
+  font-family:ui-monospace,monospace;
+}
+.ll-skel{
+  margin-top:12px;padding:12px;
+  background:var(--bg);border-radius:8px;
+  font-size:.75rem;color:var(--ink-soft);
+  text-align:center;
+}
 </style>
+  
 </head>
 <body>
-
 <a class="skip" href="#main">Lewati ke konten utama</a>
 
 <div id="autoOverlay">
@@ -1330,6 +1387,75 @@ function wireToolbar(fn){
 function liveZoneHTML(){
   return '<section class="live-zone"><div class="live-head"><span class="live-title"><span class="dot" style="background:#f5a623"></span> ⚡ Live Intelligence — Realtime → Supabase</span><button class="btn-live" id="btnLive">⚡ Ulangi Live</button></div><div class="live-status" id="liveStatus">📡 Menyambung ke Google News RSS + OpenAlex…</div><div class="live-subhead">📰 Berita realtime terkurasi — klik sub-kategori untuk mencari tanpa batas periode</div><div class="live-list" id="liveNews"><div class="skel" style="height:90px"></div></div><div class="live-subhead">📚 Riset realtime terkurasi — klik sub-kategori untuk mencari tanpa batas periode</div><div class="live-list" id="liveResearch"><div class="skel" style="height:70px"></div></div></section>';
 }
+
+/* === Live Progress Loader === */
+function liveLoaderHTML(viewId){
+  const steps = [
+    { id:"cache",   label:"Cek cache lokal (30 menit)" },
+    { id:"gdelt",   label:"Fetch GDELT Project (berita)" },
+    { id:"bing",    label:"Fallback Bing News RSS" },
+    { id:"rsshub",  label:"Fallback RSSHub publik" },
+    { id:"openalex",label:"Fetch OpenAlex (riset)" },
+    { id:"curate",  label:"Kurasi + ekstrak hashtags" },
+    { id:"save",    label:"Simpan ke cache + Supabase" }
+  ];
+  const stepsHTML = steps.map(s =>
+    '<div class="ll-step" id="ll-'+viewId+'-'+s.id+'">' +
+      '<span class="ll-ico"></span>' +
+      '<span>'+s.label+'</span>' +
+    '</div>'
+  ).join("");
+
+  return '<div class="live-loader" id="ll-'+viewId+'">' +
+    '<div class="ll-head">' +
+      '<span class="ll-title">⚡ Live Intelligence sedang berjalan…</span>' +
+      '<span class="ll-timer" id="ll-timer-'+viewId+'">⏱ 0.0s</span>' +
+    '</div>' +
+    '<div class="ll-bar"><div class="ll-bar-fill" id="ll-bar-'+viewId+'" style="width:5%"></div></div>' +
+    '<div class="ll-steps">'+stepsHTML+'</div>' +
+    '<div class="ll-eta" id="ll-eta-'+viewId+'">Estimasi: sedang menghitung…</div>' +
+    '<div class="ll-skel">⚙️ Tahap 1/7: memulai pipeline — mohon tunggu 10–30 detik</div>' +
+  '</div>';
+}
+
+/* Controller untuk update step visual */
+const _llTimers = {};
+function llStart(viewId){
+  const startAt = Date.now();
+  const idPrefix = "ll-" + viewId + "-";
+  const setStep = (stepId, status) => {
+    const el = document.getElementById(idPrefix + stepId);
+    if(!el) return;
+    el.classList.remove("active","done","fail");
+    if(status) el.classList.add(status);
+  };
+  const setBar = (pct) => {
+    const b = document.getElementById("ll-bar-" + viewId);
+    if(b) b.style.width = pct + "%";
+  };
+  const setEta = (msg) => {
+    const e = document.getElementById("ll-eta-" + viewId);
+    if(e) e.textContent = msg;
+  };
+  const setSkel = (msg) => {
+    const el = document.querySelector("#ll-" + viewId + " .ll-skel");
+    if(el) el.textContent = msg;
+  };
+  // Clear timer lama kalau ada
+  if(_llTimers[viewId]) clearInterval(_llTimers[viewId]);
+  // Timer berjalan
+  _llTimers[viewId] = setInterval(() => {
+    const el = document.getElementById("ll-timer-" + viewId);
+    if(el){
+      const sec = (Date.now() - startAt) / 1000;
+      el.textContent = "⏱ " + sec.toFixed(1) + "s";
+    }
+  }, 100);
+  return { startAt, setStep, setBar, setEta, setSkel, stop: () => {
+    clearInterval(_llTimers[viewId]); delete _llTimers[viewId];
+  }};
+}
+  
 /* [PATCH 7] liveCardHTML pakai ensureMinSummary */
 function liveCardHTML(it, idx, label){
   const cardUid = fnv(String(it.link) + label);
@@ -1370,10 +1496,12 @@ function wireLive(viewId){
 }
   
 async function runLive(viewId){
-  const st = document.getElementById("liveStatus"), nb = document.getElementById("liveNews"), rb = document.getElementById("liveResearch");
-  if(!st) return;
+  const nb = document.getElementById("liveNews");
+  const rb = document.getElementById("liveResearch");
+  const st = document.getElementById("liveStatus");
+  if(!nb || !rb) return;
 
-  // [PATCH B] Cek cache dulu — tidak fetch ulang jika masih segar (30 menit)
+  // ==== Cek cache lokal dulu ====
   const CACHE_KEY = "dcLiveCache_" + viewId;
   const CACHE_TTL = 30 * 60 * 1000;
   let cached = null;
@@ -1381,48 +1509,130 @@ async function runLive(viewId){
   const fresh = cached && (Date.now() - cached.at) < CACHE_TTL;
 
   if(fresh){
-    st.innerHTML = "⚡ Live dari cache lokal (30 menit) — klik ⚡ Ulangi Live untuk fetch ulang dari GDELT/Bing.";
-    nb.innerHTML = cached.nCur.map((it,i) => liveCardHTML(Object.assign({}, it, {date: new Date(it.date)}),i,"LIVE BERITA")).join("") || '<div class="live-note">⚠️ Kosong.</div>';
-    rb.innerHTML = cached.rCur.map((it,i) => liveCardHTML(Object.assign({}, it, {date: new Date(it.date)}),i,"LIVE RISET")).join("") || '<div class="live-note">⚠️ Kosong.</div>';
+    const ageMin = Math.round((Date.now() - cached.at) / 60000);
+    if(st) st.innerHTML = "⚡ Live dari cache lokal (" + ageMin + " menit lalu). Klik ⚡ Ulangi Live untuk refresh dari GDELT/Bing.";
+    nb.innerHTML = cached.nCur.length
+      ? cached.nCur.map((it,i) => liveCardHTML(Object.assign({}, it, {date: new Date(it.date)}),i,"LIVE BERITA")).join("")
+      : '<div class="live-note">⚠️ Kosong di cache.</div>';
+    rb.innerHTML = cached.rCur.length
+      ? cached.rCur.map((it,i) => liveCardHTML(Object.assign({}, it, {date: new Date(it.date)}),i,"LIVE RISET")).join("")
+      : '<div class="live-note">⚠️ Kosong di cache.</div>';
     return;
   }
 
-  st.innerHTML = "📡 Menghubungi GDELT + Bing News + OpenAlex…";
+  // ==== Tampilkan progress loader di kedua kolom ====
+  nb.innerHTML = liveLoaderHTML(viewId);
+  rb.innerHTML = "";
+  const ctrl = llStart(viewId);
+  const { setStep, setBar, setEta, setSkel, stop } = ctrl;
+
   const cfg = liveConfig(viewId);
-  const res = await Promise.allSettled([fetchRssItems(cfg.newsQ, 60), fetchOpenAlex(cfg.resQ, LIVE_WINDOW.startISO)]);
-  const nRaw = res[0].status === "fulfilled" ? res[0].value : null;
-  const rRaw = res[1].status === "fulfilled" ? res[1].value : null;
-  const nCur = nRaw ? curateNews(nRaw, cfg.kwords, cfg.requireRegion) : [];
-  const rCur = rRaw ? rRaw.filter(x => cfg.kwords.some(k => (x.title||"").toLowerCase().includes(k.toLowerCase()))).slice(0, 4).map(x => {
-    let sum = (x.abstract || "").trim();
-    if(sum.length < 60){ sum = "Publikasi ilmiah dari " + (x.src || "OpenAlex") + ". Dirujuk " + (x.cited||0) + " kali. Terbit " + fmtDate(x.date) + ". Topik: " + cfg.kwords.slice(0,3).join(", ") + "."; }
-    if(sum.length > 320) sum = sum.slice(0, 317).trim() + "…";
-    return Object.assign({}, x, { summary: sum, matched: (x.matched || cfg.kwords).slice(0,5) });
-  }) : [];
 
-  // [PATCH B] Simpan ke cache lokal
-  try{ localStorage.setItem(CACHE_KEY, JSON.stringify({at: Date.now(), nCur, rCur})); }catch(e){}
+  try{
+    // STEP 1: cache sudah dicek (done)
+    setStep("cache","done"); setBar(15);
+    setSkel("⚙️ Tahap 2/7: menghubungi GDELT Project (berita realtime)…");
+    setEta("Estimasi: ~5 detik (GDELT)");
 
-  // [PATCH A] Auto-save ke Supabase (admin)
-  if(isAdmin() && (nCur.length || rCur.length)){
+    // STEP 2: GDELT
+    setStep("gdelt","active");
+    let nRaw = null;
     try{
-      const liveRows = [];
-      const pushLive = (it, kind) => {
-        const an = { summary: ensureMinSummary(it), klasifikasi: (AC_TOPIC_KLAS.find(m => m.re.test(it.title)) || {k:"A"}).k,
-          country: acGuessCountry(it.title), is_indonesia: isIndonesiaLive(it), dr: liveDrills(it),
-          hashtags: (it.matched||[]).slice(0,5).map(m => "#"+m.replace(/[^a-z0-9]+/gi,"_")), ai: false };
-        liveRows.push(mapToRow(it, kind, an.klasifikasi, an));
-      };
-      nCur.forEach(it => pushLive(it, "news"));
-      rCur.forEach(it => pushLive(it, "research"));
-      const saved = await sbUpsert("dc_items", liveRows, "content_hash");
-      if(saved) console.log("[Live→Supabase] ✅ " + liveRows.length + " item tersimpan");
-    }catch(e){ console.warn("[Live→Supabase]", e.message); }
-  }
+      nRaw = await fetchGdelt(cfg.newsQ, 60);
+      setStep("gdelt","done"); setBar(35);
+      setEta("GDELT: " + (nRaw ? nRaw.length : 0) + " hasil mentah");
+    }catch(e){
+      setStep("gdelt","fail"); setBar(30);
+      setEta("GDELT gagal → fallback Bing…");
+    }
 
-  nb.innerHTML = nCur.length ? nCur.map((it,i) => liveCardHTML(it,i,"LIVE BERITA")).join("") : '<div class="live-note">⚠️ RSS/proxy tidak tersedia.</div>';
-  rb.innerHTML = rCur.length ? rCur.map((it,i) => liveCardHTML(it,i,"LIVE RISET")).join("") : '<div class="live-note">⚠️ OpenAlex kosong.</div>';
-  st.innerHTML = "✅ Live: "+(nRaw?nRaw.length:0)+" mentah → "+nCur.length+" berita; "+(rRaw?rRaw.length:0)+" → "+rCur.length+" riset. Tersimpan ke cache lokal" + (isAdmin() ? " + Supabase" : " (read-only)") + ".";
+    // STEP 3: Bing fallback (kalau GDELT kosong)
+    if(!nRaw || !nRaw.length){
+      setStep("bing","active");
+      setSkel("⚙️ Tahap 3/7: fallback Bing News RSS…");
+      try{
+        nRaw = await fetchBingNews(cfg.newsQ, 60);
+        setStep("bing","done"); setBar(45);
+        setEta("Bing: " + (nRaw ? nRaw.length : 0) + " hasil");
+      }catch(e){ setStep("bing","fail"); setBar(40); }
+    } else {
+      setStep("bing","done"); setBar(45);
+    }
+
+    // STEP 4: RSSHub fallback (kalau Bing kosong)
+    if(!nRaw || !nRaw.length){
+      setStep("rsshub","active");
+      setSkel("⚙️ Tahap 4/7: fallback RSSHub publik…");
+      try{
+        nRaw = await fetchRssHub(cfg.newsQ, 60);
+        setStep("rsshub","done"); setBar(55);
+      }catch(e){ setStep("rsshub","fail"); setBar(50); }
+    } else {
+      setStep("rsshub","done"); setBar(55);
+    }
+
+    // STEP 5: OpenAlex
+    setStep("openalex","active");
+    setSkel("⚙️ Tahap 5/7: menghubungi OpenAlex (riset akademik)…");
+    setEta("Estimasi: ~5 detik (OpenAlex)");
+    let rRaw = null;
+    try{
+      rRaw = await fetchOpenAlex(cfg.resQ, LIVE_WINDOW.startISO);
+      setStep("openalex","done"); setBar(70);
+    }catch(e){
+      setStep("openalex","fail"); setBar(65);
+    }
+
+    // STEP 6: Kurasi
+    setStep("curate","active");
+    setSkel("⚙️ Tahap 6/7: kurasi berita + ekstrak hashtag…");
+    await sleep(150);
+    const nCur = nRaw ? curateNews(nRaw, cfg.kwords, cfg.requireRegion) : [];
+    const rCur = rRaw ? rRaw.filter(x => cfg.kwords.some(k => (x.title||"").toLowerCase().includes(k.toLowerCase()))).slice(0, 4).map(x => {
+      let sum = (x.abstract || "").trim();
+      if(sum.length < 60){ sum = "Publikasi ilmiah dari " + (x.src || "OpenAlex") + ". Dirujuk " + (x.cited||0) + " kali. Terbit " + fmtDate(x.date) + ". Topik: " + cfg.kwords.slice(0,3).join(", ") + "."; }
+      if(sum.length > 320) sum = sum.slice(0, 317).trim() + "…";
+      return Object.assign({}, x, { summary: sum, matched: (x.matched || cfg.kwords).slice(0,5) });
+    }) : [];
+    setStep("curate","done"); setBar(85);
+
+    // STEP 7: Simpan cache + Supabase
+    setStep("save","active");
+    setSkel("⚙️ Tahap 7/7: simpan ke cache + Supabase…");
+    try{ localStorage.setItem(CACHE_KEY, JSON.stringify({at: Date.now(), nCur, rCur})); }catch(e){}
+
+    if(isAdmin() && (nCur.length || rCur.length)){
+      try{
+        const liveRows = [];
+        const pushLive = (it, kind) => {
+          const an = { summary: ensureMinSummary(it), klasifikasi: (AC_TOPIC_KLAS.find(m => m.re.test(it.title)) || {k:"A"}).k,
+            country: acGuessCountry(it.title), is_indonesia: isIndonesiaLive(it), dr: liveDrills(it),
+            hashtags: (it.matched||[]).slice(0,5).map(m => "#"+m.replace(/[^a-z0-9]+/gi,"_")), ai: false };
+          liveRows.push(mapToRow(it, kind, an.klasifikasi, an));
+        };
+        nCur.forEach(it => pushLive(it, "news"));
+        rCur.forEach(it => pushLive(it, "research"));
+        const saved = await sbUpsert("dc_items", liveRows, "content_hash");
+        if(saved) console.log("[Live→Supabase] ✅ " + liveRows.length + " item");
+      }catch(e){ console.warn("[Live→Supabase]", e.message); }
+    }
+    setStep("save","done"); setBar(100);
+
+    // Render hasil
+    const elapsed = ((Date.now() - ctrl.startAt) / 1000).toFixed(1);
+    if(st) st.innerHTML = "✅ Live selesai dalam " + elapsed + "s: <b>"+(nRaw?nRaw.length:0)+"</b> mentah → <b>"+nCur.length+"</b> berita; <b>"+(rRaw?rRaw.length:0)+"</b> → <b>"+rCur.length+"</b> riset. Tersimpan ke cache lokal" + (isAdmin() ? " + Supabase" : "") + ".";
+
+    nb.innerHTML = nCur.length ? nCur.map((it,i) => liveCardHTML(it,i,"LIVE BERITA")).join("") : '<div class="live-note">⚠️ Tidak ada berita yang lolos kurasi. Sumber mungkin diblokir sementara.</div>';
+    rb.innerHTML = rCur.length ? rCur.map((it,i) => liveCardHTML(it,i,"LIVE RISET")).join("") : '<div class="live-note">⚠️ OpenAlex kosong pada jendela ini.</div>';
+
+  }catch(e){
+    console.error("[Live]", e);
+    nb.innerHTML = '<div class="live-note">⚠️ Gagal: ' + esc(e.message) + '. Coba klik ⚡ Ulangi Live.</div>';
+    rb.innerHTML = "";
+    if(st) st.innerHTML = "❌ Live error setelah " + ((Date.now() - ctrl.startAt)/1000).toFixed(1) + "s";
+  }finally{
+    stop();
+  }
 }
 
 // [PATCH C] Visitor baca dari Supabase dulu sebelum fetch GDELT
