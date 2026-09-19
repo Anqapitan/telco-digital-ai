@@ -796,37 +796,29 @@ def check_model_availability(provider: str, model: str, api_key: str) -> Tuple[b
 # SEARCH & SCRAPE
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
-import time
-import random
-from ddgs import DDGS
-from ddgs.exceptions import RatelimitException, TimeoutException
-
-def ddg_fetch_with_retry(query: str, max_results: int = 4, max_retries: int = 3) -> Tuple[List[Dict[str, Any]], str]:
-    """
-    DuckDuckGo search dengan exponential backoff + jitter.
-    Mencoba ulang jika terjadi rate limit atau timeout.
-    """
+def ddg_fetch(query: str, max_results: int = 4) -> Tuple[List[Dict[str, Any]], str]:
+    """DDG search dengan exponential backoff + jitter."""
     if not DDG_AVAILABLE:
-        return [], f"ddgs tidak tersedia"
-    initial_delay = 2  # detik
+        return [], f"ddgs tidak tersedia ({DDG_ERROR})"
+
+    max_retries = 3
+    initial_delay = 2.0
+
     for attempt in range(max_retries):
         try:
-            # Gunakan timeout untuk mencegah blocking
-            with DDGS(timeout=15) as ddgs:
-                res = list(ddgs.text(query, max_results=max_results))
+            with DDGS(timeout=15) as d:
+                res = list(d.text(query, max_results=max_results))
             return res, ""
         except RatelimitException:
             if attempt == max_retries - 1:
-                return [], "DuckDuckGo rate-limit. Coba lagi nanti atau gunakan proxy."
-            # Exponential backoff dengan jitter
+                return [], ("DuckDuckGo rate-limit. Coba beberapa menit lagi.")
             delay = initial_delay * (2 ** attempt) + random.uniform(0, 1)
             time.sleep(delay)
         except TimeoutException:
             if attempt == max_retries - 1:
                 return [], "Timeout saat menghubungi DuckDuckGo."
             time.sleep(initial_delay)
-        except Exception as e:
-            # Error lain, tidak perlu retry
+        except Exception as e:  # noqa: BLE001
             return [], str(e)[:150]
     return [], "Gagal setelah beberapa percobaan."
 
