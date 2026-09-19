@@ -1162,7 +1162,10 @@ window.addEventListener("hashchange", () => { const v = parseHash(); if(v && v !
 function stampNow(){ const el = document.getElementById("lastUpdate"); if(el) el.textContent = new Date().toLocaleTimeString("id-ID"); }
 function showLoading(){ main.innerHTML = '<div class="loading-note">📡 Memuat…</div><div class="loading"><div class="skel"></div><div class="skel"></div></div>'; }
 function acRefreshCurrentView(){ if(currentView === "ID") renderIndonesia(); else if(KLAS.find(k => k.id === currentView)) renderKlas(currentView); }
-function chatUrl(t, u){ return "https://huggingface.co/chat/?q=" + encodeURIComponent('Analisis ringkas: "'+t+'" | Sumber murni: '+u); }
+function chatUrl(t, u){
+  const prompt = "[Sumber: " + (t || "") + "] | URL: " + (u || "");
+  return "https://telco-digital-ai.streamlit.app/?prompt=" + encodeURIComponent(prompt.slice(0, 900));
+}
 function actionButtons(t, u, mini){
   const c = mini ? "btn-act mini" : "btn-act";
   return '<div class="r-actions"><button class="'+c+'" data-share-url="'+safeUrl(u)+'">🔗 Share</button><button class="'+c+'" data-chat-url="'+esc(chatUrl(t,u))+'">🤖 Chat AI</button></div>';
