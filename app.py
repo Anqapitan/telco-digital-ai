@@ -1,51 +1,42 @@
 """
-ID Telco Digital AI Assistant - v5.3.0 (Production-Hardened)
-=============================================================
-Refactor dari v5.2.0 berdasarkan code review produksi. Semua P0 & P1 diperbaiki.
+ID Telco Digital AI Assistant - v5.3.1 (GitHub Pages Migration)
+================================================================
+Changelog v5.3.1 (dari v5.3.0):
+- Migrasi dashboard HTML dari ByetHost → GitHub Pages
+- Konstanta GITHUB_PAGES_BASE + SITE_DOMAIN (single source of truth)
+- Scraping dashboard kini mengembalikan status 'ok' (tidak lagi 'blocked')
+- Pesan UI diperbarui (tidak lagi menyebut ByetHost-specific)
+- KEY FACTS hardcoded menyertakan URL dashboard resmi
+- BUGFIX: tambah `import random` (digunakan di ddg_fetch)
+- BUGFIX: tambah import RatelimitException & TimeoutException dari ddgs
+- BUGFIX: DDGS(timeout=15) fallback jika versi ddgs tidak mendukung
+- BUGFIX: admin fallback password disamakan dengan caption ('admin')
 
-CHANGELOG v5.3.0:
-- P0: Mermaid securityLevel=strict + sanitasi label auto-quote
-- P0: HTML escape di semua unsafe_allow_html dengan data dinamis
-- P0: Fix analytics query_success (guard isin untuk kompatibilitas)
-- P0: Dynamic max_tokens berbasis MODEL_PROFILES (bukan hardcoded 8192)
-- P0: RLS policy Supabase didokumentasikan di module docstring
-- P1: Upload size limit (8MB/file, 20MB total) + kompresi gambar via Pillow
-- P1: Admin login throttle (5 percobaan / 5 menit)
-- P1: response_time_ms dicatat di setiap query
-- P1: Privacy notice di sidebar
-- P1: Probe availability dibatasi 1x / 60 detik per session
-- P2: Protected KEY FACTS tidak dibuang oleh RAG filter
-- P2: Synonym expansion untuk RAG
-- P2: Pagination admin analytics
-- P2: answer_id untuk korelasi feedback
-- P2: Research mode formal (Ringkasan/Fakta/Analisis/Risiko/Sumber)
+Struktur repo GitHub (WAJIB):
+    repo-anda/
+    ├── app_telcodigitalai_v5.3.1.py    ← file ini
+    ├── requirements.txt
+    ├── .streamlit/
+    │   └── config.toml
+    ├── Live_DC_ASPAC.html              ← dashboard DC (di root)
+    ├── Live_FOSubsea_ASPAC.html        ← dashboard FO (di root)
+    └── README.md (opsional)
+
+URL publik dashboard setelah GitHub Pages aktif:
+    https://anqapitan.github.io/telco-digital-ai/Live_DC_ASPAC.html
+    https://anqapitan.github.io/telco-digital-ai/Live_FOSubsea_ASPAC.html
 
 SETUP SUPABASE (jalankan di SQL Editor):
 -----------------------------------------
--- Tabel log
 CREATE TABLE IF NOT EXISTS telcodigitalai_logs (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     timestamp_utc TIMESTAMPTZ DEFAULT now(),
-    session_id TEXT,
-    ip TEXT,
-    country TEXT,
-    origin_url TEXT,
-    feature TEXT,
-    model TEXT,
-    prompt_snippet TEXT,
-    answer_snippet TEXT,
-    files_uploaded INT,
-    web_search_used BOOLEAN,
-    specialized_used BOOLEAN,
-    user_agent TEXT,
-    app_version TEXT,
-    error_note TEXT,
-    feedback TEXT,
-    response_time_ms INT,
-    answer_id TEXT
+    session_id TEXT, ip TEXT, country TEXT, origin_url TEXT,
+    feature TEXT, model TEXT, prompt_snippet TEXT, answer_snippet TEXT,
+    files_uploaded INT, web_search_used BOOLEAN, specialized_used BOOLEAN,
+    user_agent TEXT, app_version TEXT, error_note TEXT,
+    feedback TEXT, response_time_ms INT, answer_id TEXT
 );
-
--- RLS: anon hanya boleh INSERT, tidak boleh SELECT/UPDATE/DELETE
 ALTER TABLE telcodigitalai_logs ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "allow_anon_insert_only"
@@ -54,7 +45,6 @@ ON telcodigitalai_logs FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY "allow_service_role_all"
 ON telcodigitalai_logs FOR ALL TO service_role USING (true);
 
--- Index untuk analytics
 CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON telcodigitalai_logs (timestamp_utc DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_feature ON telcodigitalai_logs (feature);
 
@@ -62,7 +52,7 @@ STREAMLIT SECRETS yang dibutuhkan:
 - HF_TOKEN, GROQ_API_KEY, OPENROUTER_API_KEY
 - SUPABASE_URL, SUPABASE_KEY (anon, untuk insert)
 - SUPABASE_SERVICE_KEY (untuk analytics SELECT — JANGAN dipakai untuk insert)
-- ADMIN_PASSWORD_HASH (sha256 hex; generate: echo -n 'pwd' | sha256sum)
+- ADMIN_PASSWORD atau ADMIN_PASSWORD_HASH (opsional; fallback prototype: "admin")
 - SUPABASE_TABLE (opsional)
 """
 from __future__ import annotations
@@ -75,6 +65,7 @@ import hashlib
 import html
 import io
 import json
+import random          # ★ BUGFIX v5.3.1: dibutuhkan oleh ddg_fetch()
 import re
 import time
 import traceback
@@ -94,8 +85,20 @@ import streamlit as st
 # OPTIONAL DEPENDENCIES
 # ─────────────────────────────────────────────────────────────
 DDG_AVAILABLE, DDG_ERROR = False, ""
+RatelimitException: type = Exception  # type: ignore
+TimeoutException: type = Exception    # type: ignore
 try:
-    from ddgs import DDGS
+    from ddgs import DDGS  # type: ignore
+    try:
+        from ddgs.exceptions import RatelimitException, TimeoutException  # type: ignore
+    except ImportError:
+        # Fallback: gunakan nama-nama yang mungkin tersedia
+        try:
+            from ddgs.exceptions import (  # type: ignore
+                DuckDuckGoSearchException as RatelimitException,
+            )
+        except ImportError:
+            pass
     DDG_AVAILABLE = True
 except Exception as e:  # noqa: BLE001
     DDG_ERROR = str(e)[:120]
@@ -153,7 +156,12 @@ except Exception as e:  # noqa: BLE001
 # ─────────────────────────────────────────────────────────────
 # KONSTANTA
 # ─────────────────────────────────────────────────────────────
-APP_VERSION = "5.3.0"
+APP_VERSION = "5.3.1"
+
+# ═══ GitHub Pages Base URL (dashboard HTML) ═══
+# Ganti 2 baris ini jika pindah ke custom domain di masa depan.
+GITHUB_PAGES_BASE = "https://anqapitan.github.io/telco-digital-ai"
+SITE_DOMAIN = "anqapitan.github.io"  # untuk query DDG site:
 
 API_URL_GROQ = "https://api.groq.com/openai/v1/chat/completions"
 API_URL_OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
@@ -175,20 +183,18 @@ PROBE_COOLDOWN_SEC = 60
 LLM_TIMEOUT_PER_MODEL = 60
 LLM_MAX_ATTEMPTS = 6
 
-# Upload limits
 MAX_UPLOAD_MB = 8.0
 MAX_TOTAL_UPLOAD_MB = 20.0
 MAX_IMAGE_DIMENSION = 1600
 
-# Admin
 ADMIN_MAX_ATTEMPTS = 5
 ADMIN_LOCKOUT_SEC = 300
+ADMIN_FALLBACK_PASSWORD = "admin"  # ganti via secrets ADMIN_PASSWORD
 
-# Protected context marker (tidak akan dibuang oleh RAG)
 PROTECTED_MARKER = "<!-- PROTECTED_KEY_FACTS -->"
 
 # ─────────────────────────────────────────────────────────────
-# MODEL PROFILES — untuk dynamic max_tokens
+# MODEL PROFILES
 # ─────────────────────────────────────────────────────────────
 MODEL_PROFILES: Dict[str, Dict[str, Any]] = {
     "openai/gpt-oss-20b":              {"max_output": 4096, "context": 8192},
@@ -257,37 +263,27 @@ IS_DARK = (_detect_theme() == "dark")
 # ─────────────────────────────────────────────────────────────
 if IS_DARK:
     C = {
-        "bg": "#0e1117",
-        "surface": "#1c1f26",
+        "bg": "#0e1117", "surface": "#1c1f26",
         "surface_alt": "rgba(255,255,255,0.04)",
         "border": "rgba(255,255,255,0.15)",
-        "text": "#fafafa",
-        "text_muted": "#b0b3b8",
-        "accent": "#4a9eff",
-        "accent_bg": "rgba(74,158,255,0.12)",
-        "warn": "#ffb74d",
-        "warn_bg": "rgba(255,183,77,0.14)",
+        "text": "#fafafa", "text_muted": "#b0b3b8",
+        "accent": "#4a9eff", "accent_bg": "rgba(74,158,255,0.12)",
+        "warn": "#ffb74d", "warn_bg": "rgba(255,183,77,0.14)",
         "warn_border": "#ffb74d",
-        "error": "#ef5350",
-        "error_bg": "rgba(239,83,80,0.12)",
+        "error": "#ef5350", "error_bg": "rgba(239,83,80,0.12)",
         "code_bg": "rgba(255,255,255,0.05)",
         "mermaid_theme": "dark",
     }
 else:
     C = {
-        "bg": "#ffffff",
-        "surface": "#ffffff",
+        "bg": "#ffffff", "surface": "#ffffff",
         "surface_alt": "rgba(0,0,0,0.02)",
         "border": "rgba(0,0,0,0.12)",
-        "text": "#1a1a1a",
-        "text_muted": "#5a5a5a",
-        "accent": "#1e88e5",
-        "accent_bg": "#f0f7ff",
-        "warn": "#b26a00",
-        "warn_bg": "#fff8e1",
+        "text": "#1a1a1a", "text_muted": "#5a5a5a",
+        "accent": "#1e88e5", "accent_bg": "#f0f7ff",
+        "warn": "#b26a00", "warn_bg": "#fff8e1",
         "warn_border": "#ffb300",
-        "error": "#c62828",
-        "error_bg": "#ffebee",
+        "error": "#c62828", "error_bg": "#ffebee",
         "code_bg": "#f5f5f5",
         "mermaid_theme": "default",
     }
@@ -388,10 +384,8 @@ DEFAULT_CHOICE_ID = "groq:openai/gpt-oss-20b"
 # MULTI-LANGUAGE
 # ─────────────────────────────────────────────────────────────
 LANG_OPTIONS = {
-    "id": "🇮🇩 Bahasa Indonesia",
-    "en": "🇬🇧 English",
-    "ms": "🇲🇾 Bahasa Melayu",
-    "auto": "🌐 Auto",
+    "id": "🇮🇩 Bahasa Indonesia", "en": "🇬🇧 English",
+    "ms": "🇲🇾 Bahasa Melayu", "auto": "🌐 Auto",
 }
 LANG_INSTRUCTIONS = {
     "id": "Selalu jawab dalam Bahasa Indonesia yang profesional, jelas, dan terstruktur.",
@@ -411,12 +405,12 @@ Gunakan format riset formal berikut:
 """
 
 # ─────────────────────────────────────────────────────────────
-# SOURCES
+# SOURCES — GitHub Pages (v5.3.1)
 # ─────────────────────────────────────────────────────────────
 SPECIALIZED_SOURCES = {
     "dc": {
         "name": "Live Data Center Asia Pacific",
-        "url": "https://narational.byethost11.com/Live_DC_ASPAC.html",
+        "url": f"{GITHUB_PAGES_BASE}/Live_DC_ASPAC.html",
         "description": ("Curated Research Dashboard • 7 klasifikasi industri DC APAC. "
                         "Fokus Indonesia + APAC. Oleh nap@iicf.or.id."),
         "keywords": ["data center", "datacenter", "hyperscale", "AI campus", "GPU",
@@ -424,7 +418,7 @@ SPECIALIZED_SOURCES = {
     },
     "fo": {
         "name": "Live Fiber Optic & Submarine Cable Asia Pacific",
-        "url": "https://narational.byethost11.com/Live_FOSubsea_ASPAC.html",
+        "url": f"{GITHUB_PAGES_BASE}/Live_FOSubsea_ASPAC.html",
         "description": ("Curated Research Dashboard • 8 klasifikasi industri FO & SubSEA APAC. "
                         "Oleh nap@iicf.or.id."),
         "keywords": ["submarine cable", "subsea", "fiber optic", "kabel laut",
@@ -432,21 +426,23 @@ SPECIALIZED_SOURCES = {
     },
 }
 
-KEY_FACTS_DC = """=== KEY FACTS LIVE DC ASPAC (snapshot ~Sep 2026) ===
+KEY_FACTS_DC = f"""=== KEY FACTS LIVE DC ASPAC (snapshot ~Sep 2026) ===
 - CoreWeave: DC pertama di Asia-Pacific di Indonesia (target 2028).
 - Firmus Technologies + NVIDIA: AI Factory 360 MW di Batam, ~170.000 GPU, target Q1 2027.
 - DayOne mengembangkan kapasitas signifikan di Batam.
 - BATIC 2026 (Bali) menekankan infrastruktur digital & AI.
 - Periode fokus: ~16 Jul – 16 Sep 2026.
+Dashboard resmi: {GITHUB_PAGES_BASE}/Live_DC_ASPAC.html
 [CATATAN: verifikasi angka spesifik ke dashboard.]"""
 
-KEY_FACTS_FO = """=== KEY FACTS LIVE FO & SUBSEA ASPAC (snapshot ~Sep 2026) ===
+KEY_FACTS_FO = f"""=== KEY FACTS LIVE FO & SUBSEA ASPAC (snapshot ~Sep 2026) ===
 - Nongsa-Changi Cable (NCC) mendarat ~20 Juli 2026 di Nongsa Digital Park
   (Telin + BW Digital). 24 fiber pairs, >1.6 Pbps.
 - Sistem Echo (Google & Meta) mendarat di Singapore; melibatkan Indonesia.
 - ION Cable System & Ciena WaveLogic memperkuat backbone Jakarta–Singapore.
 - Telkom via Telin memperkuat ambisi Indonesia sebagai Hub Internet APAC.
 - Periode fokus: ~16 Jun – 16 Sep 2026.
+Dashboard resmi: {GITHUB_PAGES_BASE}/Live_FOSubsea_ASPAC.html
 [CATATAN: verifikasi angka spesifik ke dashboard.]"""
 
 # ─────────────────────────────────────────────────────────────
@@ -464,7 +460,6 @@ SYNONYMS = {
 # UTILS
 # ─────────────────────────────────────────────────────────────
 def _is_private_ip(ip: str) -> bool:
-    """Cek IP privat/loopback/link-local/CGNAT."""
     if not ip or ip == "unknown":
         return True
     try:
@@ -487,7 +482,6 @@ def _is_private_ip(ip: str) -> bool:
         return True
 
 def safe_get_ip_and_country() -> Tuple[str, str]:
-    """Best-effort IP + country. Soft-fail → ('unknown','unknown')."""
     ip, country = "unknown", "unknown"
     try:
         headers: Dict[str, str] = {}
@@ -539,7 +533,6 @@ def safe_get_ip_and_country() -> Tuple[str, str]:
     return ip, country
 
 def get_external_referrer() -> str:
-    """Referer eksternal (bukan domain app sendiri)."""
     try:
         headers: Dict[str, str] = {}
         if hasattr(st, "context") and st.context:
@@ -563,7 +556,6 @@ def generate_session_id() -> str:
     return st.session_state["session_id"]
 
 def sanitize_text(text: str, max_len: int = 4000) -> str:
-    """Hapus control chars & potong."""
     if not text:
         return ""
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(text))[:max_len]
@@ -587,11 +579,9 @@ def get_api_keys() -> Tuple[Optional[str], Optional[str], Optional[str]]:
             _get_secret("OPENROUTER_API_KEY", "openrouter_api_key", "OPENROUTER_KEY"))
 
 def estimate_tokens(text: str) -> int:
-    """Estimasi kasar: ~3.5 char/token untuk campuran ID/EN."""
     return max(1, int(len(text) / 3.5)) if text else 0
 
 def hash_ip(ip: str) -> str:
-    """Privacy: hash IP dengan salt tetap (bukan reversible)."""
     if ip in ("unknown", "internal", ""):
         return ip
     return "h:" + hashlib.sha256(f"tdai-{ip}".encode()).hexdigest()[:16]
@@ -600,7 +590,6 @@ def hash_ip(ip: str) -> str:
 # RATE LIMIT
 # ─────────────────────────────────────────────────────────────
 def _rate_limit_check() -> Tuple[bool, str]:
-    """Sliding window per session."""
     now = time.time()
     ts: deque = st.session_state.get("_rate_ts", deque())
     while ts and (now - ts[0]) > RATE_LIMIT_WINDOW_SEC:
@@ -616,7 +605,6 @@ def _rate_limit_check() -> Tuple[bool, str]:
     return True, ""
 
 def _probe_cooldown_ok() -> bool:
-    """Cegah probe berulang untuk hemat kuota."""
     now = time.time()
     last = st.session_state.get("_probe_ts", 0)
     if now - last < PROBE_COOLDOWN_SEC:
@@ -631,10 +619,6 @@ def get_supabase_table_name() -> str:
     return _get_secret("SUPABASE_TABLE") or DEFAULT_SUPABASE_TABLE
 
 def get_supabase_client(admin: bool = False) -> Optional["Client"]:
-    """
-    admin=True → pakai service_role key untuk SELECT.
-    admin=False → pakai anon key untuk INSERT.
-    """
     if not SUPABASE_AVAILABLE:
         return None
     try:
@@ -654,18 +638,16 @@ def get_supabase_client(admin: bool = False) -> Optional["Client"]:
 
 def append_behavior_log(row: Dict[str, Any]) -> Tuple[bool, str]:
     """
-    Insert log via raw requests dengan 'Prefer: return=minimal' untuk menghindari
+    Insert via raw requests dengan 'Prefer: return=minimal' untuk menghindari
     PostgREST menambahkan RETURNING (yang butuh SELECT policy untuk anon).
     """
     try:
         url = _get_secret("SUPABASE_URL")
         key = _get_secret("SUPABASE_KEY", "SUPABASE_ANON_KEY")
         if not url or not key:
-            return False, ("SUPABASE_URL / SUPABASE_KEY tidak terbaca di secrets")
+            return False, "SUPABASE_URL / SUPABASE_KEY tidak terbaca di secrets"
 
         table = get_supabase_table_name()
-
-        # Bersihkan row (None → "", biarkan bool/int apa adanya)
         clean: Dict[str, Any] = {}
         for k, v in row.items():
             if v is None:
@@ -679,18 +661,14 @@ def append_behavior_log(row: Dict[str, Any]) -> Tuple[bool, str]:
             "apikey": key,
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
-            # ★ KUNCI: jangan minta row yang di-insert dikembalikan
             "Prefer": "return=minimal",
         }
-
         endpoint = f"{url.rstrip('/')}/rest/v1/{table}"
         r = requests.post(endpoint, json=clean, headers=headers, timeout=10)
 
-        # PostgREST mengembalikan 201 Created dengan return=minimal
         if r.status_code in (200, 201, 204):
             return True, f"OK → tabel `{table}`"
 
-        # Error handling
         body = (r.text or "")[:300]
         if r.status_code == 409:
             return False, f"Konflik (duplikat?) — HTTP {r.status_code}"
@@ -723,10 +701,7 @@ def log_access(
             ua = h.get("User-Agent", "") or h.get("user-agent", "")
         except Exception:  # noqa: BLE001
             pass
-
-        # Privacy: hash IP sebelum disimpan
         ip_hashed = hash_ip(ip) if st.session_state.get("privacy_mode", True) else ip
-
         row: Dict[str, Any] = {
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "session_id": generate_session_id(),
@@ -758,7 +733,6 @@ def log_access(
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600, show_spinner=False)
 def check_model_availability(provider: str, model: str, api_key: str) -> Tuple[bool, str]:
-    """Probe ringan (max_tokens=1). Return (ok, note)."""
     if not api_key:
         return False, "no API key"
     try:
@@ -806,12 +780,16 @@ def ddg_fetch(query: str, max_results: int = 4) -> Tuple[List[Dict[str, Any]], s
 
     for attempt in range(max_retries):
         try:
-            with DDGS(timeout=15) as d:
+            try:
+                ddgs_inst = DDGS(timeout=15)
+            except TypeError:
+                ddgs_inst = DDGS()
+            with ddgs_inst as d:
                 res = list(d.text(query, max_results=max_results))
             return res, ""
         except RatelimitException:
             if attempt == max_retries - 1:
-                return [], ("DuckDuckGo rate-limit. Coba beberapa menit lagi.")
+                return [], "DuckDuckGo rate-limit. Coba beberapa menit lagi."
             delay = initial_delay * (2 ** attempt) + random.uniform(0, 1)
             time.sleep(delay)
         except TimeoutException:
@@ -878,7 +856,7 @@ def fetch_rss_headlines(cat: str) -> List[str]:
         return []
 
 # ─────────────────────────────────────────────────────────────
-# SIMPLE RAG dengan SYNONYMS + PROTECTED CONTEXT
+# SIMPLE RAG
 # ─────────────────────────────────────────────────────────────
 _STOP = {
     "yang", "dan", "di", "ke", "dari", "pada", "untuk", "dengan", "ini", "itu",
@@ -889,7 +867,6 @@ _STOP = {
 }
 
 def _expand_query_synonyms(query: str) -> str:
-    """Tambahkan sinonim ke query untuk meningkatkan recall RAG."""
     low = query.lower()
     extras: List[str] = []
     for key, syns in SYNONYMS.items():
@@ -926,10 +903,6 @@ def _score_kw(q: str, paras: List[str]) -> List[float]:
             for p in paras]
 
 def simple_rag_filter(query: str, ctx: str, max_chars: int = MAX_CONTEXT_CHARS) -> str:
-    """
-    Filter konteks berdasarkan relevansi + sinonim.
-    Paragraf dengan PROTECTED_MARKER selalu dipertahankan.
-    """
     if not ctx:
         return ""
     if len(ctx) <= max_chars:
@@ -939,7 +912,6 @@ def simple_rag_filter(query: str, ctx: str, max_chars: int = MAX_CONTEXT_CHARS) 
     if not paras:
         return ctx[:max_chars] + "\n\n[...dipotong...]"
 
-    # Pisahkan protected vs dynamic
     protected: List[Tuple[int, str]] = []
     dynamic: List[Tuple[int, str]] = []
     for i, p in enumerate(paras):
@@ -949,8 +921,6 @@ def simple_rag_filter(query: str, ctx: str, max_chars: int = MAX_CONTEXT_CHARS) 
             dynamic.append((i, p))
 
     expanded_q = _expand_query_synonyms(query)
-
-    # Skor hanya dynamic
     dynamic_texts = [p for _, p in dynamic]
     if dynamic_texts:
         scores = _score_tfidf(expanded_q, dynamic_texts)
@@ -959,7 +929,6 @@ def simple_rag_filter(query: str, ctx: str, max_chars: int = MAX_CONTEXT_CHARS) 
     else:
         scores = []
 
-    # Budget: protected selalu masuk; dynamic sisa
     protected_text = "\n\n".join(p for _, p in protected)
     budget = max(500, max_chars - len(protected_text) - 100)
 
@@ -976,10 +945,8 @@ def simple_rag_filter(query: str, ctx: str, max_chars: int = MAX_CONTEXT_CHARS) 
         if len(selected_dynamic) >= RAG_TOP_K * 2:
             break
 
-    # Gabungkan berdasarkan urutan asli
     all_selected = sorted(protected + selected_dynamic, key=lambda x: x[0])
     result = "\n\n".join(p for _, p in all_selected)
-
     if len(result) < len(ctx):
         result += f"\n\n[...{len(ctx) - len(result)} karakter tidak relevan disaring RAG...]"
     return result[:max_chars]
@@ -1009,7 +976,6 @@ def _extract_pdf(data: bytes, max_chars: int = 12000) -> str:
 def _compress_image(data: bytes, mime: str,
                     max_dim: int = MAX_IMAGE_DIMENSION,
                     quality: int = 80) -> Tuple[bytes, str]:
-    """Kompres gambar ke JPEG. Fallback: return original jika Pillow tidak ada."""
     if not PIL_AVAILABLE:
         return data, mime
     try:
@@ -1032,17 +998,14 @@ def _compress_image(data: bytes, mime: str,
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=quality, optimize=True)
         new_data = buf.getvalue()
-        # Hanya gunakan hasil kompresi jika lebih kecil
         if len(new_data) < len(data):
             return new_data, "image/jpeg"
         return data, mime
     except Exception:  # noqa: BLE001
         return data, mime
 
-def validate_upload_size(
-    files: List[Any],
-) -> Tuple[List[Tuple[str, str, bytes]], List[str]]:
-    """Return (valid_files, warnings)."""
+def validate_upload_size(files: List[Any]
+                          ) -> Tuple[List[Tuple[str, str, bytes]], List[str]]:
     valid: List[Tuple[str, str, bytes]] = []
     warnings: List[str] = []
     total_mb = 0.0
@@ -1065,17 +1028,14 @@ def validate_upload_size(
         valid.append((f.name, f.type or "application/octet-stream", data))
     return valid, warnings
 
-def prepare_file_parts(
-    files: List[Tuple[str, str, bytes]],
-) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Return (parts, notes)."""
+def prepare_file_parts(files: List[Tuple[str, str, bytes]]
+                       ) -> Tuple[List[Dict[str, Any]], List[str]]:
     parts: List[Dict[str, Any]] = []
     notes: List[str] = []
     for name, mime, data in files:
         try:
             lname = name.lower()
             if lname.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
-                # Kompres gambar jika memungkinkan
                 comp_data, comp_mime = _compress_image(data, mime)
                 b64 = base64.b64encode(comp_data).decode()
                 saved = len(data) - len(comp_data)
@@ -1115,10 +1075,9 @@ def prepare_file_parts(
     return parts, notes
 
 # ─────────────────────────────────────────────────────────────
-# LLM CASCADE dengan DYNAMIC max_tokens
+# LLM CASCADE
 # ─────────────────────────────────────────────────────────────
 def _choose_max_tokens(msgs: List[Dict[str, Any]], model: str) -> int:
-    """Hitung max_tokens dinamis dari ukuran input + profil model."""
     profile = MODEL_PROFILES.get(model, DEFAULT_PROFILE)
     try:
         text = json.dumps(msgs, ensure_ascii=False)
@@ -1128,7 +1087,7 @@ def _choose_max_tokens(msgs: List[Dict[str, Any]], model: str) -> int:
 
     context_window = profile.get("context", 8192)
     max_output = profile.get("max_output", 2048)
-    reserved = 512  # safety margin
+    reserved = 512
 
     available = context_window - est_in - reserved
     if available < 256:
@@ -1168,7 +1127,6 @@ def call_chain(
     mm_msgs: Optional[List[Dict[str, Any]]] = None,
     force_text: bool = False,
 ) -> Tuple[str, str, str, List[str], bool]:
-    """Cascade. Return (answer, provider, model, fail_log, switched)."""
     hf, groq, ork = get_api_keys()
     pid = st.session_state.get("model_selected", DEFAULT_CHOICE_ID)
     primary = CHOICE_BY_ID.get(pid) or CHOICE_BY_ID[DEFAULT_CHOICE_ID]
@@ -1223,15 +1181,11 @@ def llm_summarize(text: str, instr: str) -> str:
     return ans or ""
 
 # ─────────────────────────────────────────────────────────────
-# BUILD CONTEXT
+# BUILD CONTEXT (v5.3.1 — GitHub Pages)
 # ─────────────────────────────────────────────────────────────
 def build_search_context(
-    prompt: str,
-    prioritize: str,
-    use_web: bool,
-    use_spec: bool,
+    prompt: str, prioritize: str, use_web: bool, use_spec: bool,
 ) -> Tuple[str, List[str], List[Tuple[str, str, str]], bool, bool]:
-    """Return: (context, sources_used, notes, web_used, spec_used)."""
     parts: List[str] = []
     sources: List[str] = []
     notes: List[Tuple[str, str, str]] = []
@@ -1246,7 +1200,6 @@ def build_search_context(
         if prioritize in ("dc", "both"):
             s = SPECIALIZED_SOURCES["dc"]
             parts.append(f"1. **{s['name']}**\n   URL: {s['url']}\n   {s['description']}\n")
-            # Mark KEY FACTS as protected
             parts.append(f"{PROTECTED_MARKER}\n{KEY_FACTS_DC}")
             h = fetch_rss_headlines("dc")
             if h:
@@ -1271,14 +1224,15 @@ def build_search_context(
             else:
                 notes.append((s["name"], status, detail))
 
+        # DDG site-search — v5.3.1 pakai SITE_DOMAIN (GitHub Pages)
         site_q: List[str] = []
         if prioritize in ("dc", "both"):
-            site_q.append(f'site:narational.byethost11.com ({prompt})')
-            site_q.append('site:narational.byethost11.com (CoreWeave OR Firmus '
-                          'OR "data center" OR Batam)')
+            site_q.append(f'site:{SITE_DOMAIN} ({prompt})')
+            site_q.append(f'site:{SITE_DOMAIN} (CoreWeave OR Firmus '
+                          f'OR "data center" OR Batam)')
         if prioritize in ("fo", "both"):
-            site_q.append('site:narational.byethost11.com ("Nongsa-Changi" OR Echo '
-                          'OR "submarine cable")')
+            site_q.append(f'site:{SITE_DOMAIN} ("Nongsa-Changi" OR Echo '
+                          f'OR "submarine cable")')
 
         all_res: List[Dict[str, Any]] = []
         seen: set = set()
@@ -1294,7 +1248,8 @@ def build_search_context(
         if all_res:
             lines = ["=== HASIL PENCARIAN TARGETED ==="]
             for i, r in enumerate(all_res[:6], 1):
-                tag = " [SUMBER KURASI]" if "narational" in r.get("href", "") else ""
+                # v5.3.1: cek SITE_DOMAIN (bukan "narational" lagi)
+                tag = " [SUMBER KURASI]" if SITE_DOMAIN in r.get("href", "") else ""
                 lines.append(f"{i}. {r.get('title', '')}{tag}\n"
                              f"{(r.get('body', '') or '')[:300]}...\n"
                              f"Sumber: {r.get('href', '')}")
@@ -1353,13 +1308,9 @@ def create_pdf_from_history(history: List[Dict[str, Any]],
         return None
 
 # ─────────────────────────────────────────────────────────────
-# MERMAID — strict mode + auto-quote
+# MERMAID
 # ─────────────────────────────────────────────────────────────
 def _sanitize_mermaid_code(code: str) -> str:
-    """
-    Auto-quote label Mermaid yang mengandung special chars.
-    Contoh: DC[Data Center (Batam & Bali)] → DC["Data Center (Batam & Bali)"]
-    """
     def _quote(match: re.Match) -> str:
         nid = match.group(1)
         label = match.group(2).strip().replace('"', '\\"')
@@ -1503,19 +1454,18 @@ def extract_and_render_mermaid(text: str) -> None:
                     st.code(code, language="mermaid")
 
 # ─────────────────────────────────────────────────────────────
-# RENDER NOTES (dengan HTML escape)
+# RENDER NOTES (v5.3.1 — generic messages)
 # ─────────────────────────────────────────────────────────────
 SCRAPE_MSG = {
-    "blocked": ("🛡️ <strong>{name}</strong> dilindungi anti-bot (HTTP {detail}). "
+    "blocked": ("🛡️ <strong>{name}</strong> menolak akses otomatis (HTTP {detail}). "
                 "Fallback aktif: DDG site-search + KEY FACTS."),
     "js_required": "🧩 <strong>{name}</strong> butuh JavaScript. Fallback: DDG + KEY FACTS.",
-    "empty": "📭 <strong>{name}</strong> kosong saat diakses dari cloud. Fallback: DDG + KEY FACTS.",
-    "error": "⚠️ <strong>{name}</strong> gagal ({detail}). Fallback: DDG + KEY FACTS.",
+    "empty": "📭 <strong>{name}</strong> mengembalikan konten kosong. Fallback: DDG + KEY FACTS.",
+    "error": "⚠️ <strong>{name}</strong> gagal diakses ({detail}). Fallback: DDG + KEY FACTS.",
     "library_missing": "📦 beautifulsoup4 tidak terinstall — scraping dilewati.",
 }
 
 def render_context_notes(notes: List[Tuple[str, str, str]]) -> None:
-    """Semua data dinamis di-escape untuk cegah XSS."""
     for name, status, detail in notes:
         if status == "ok":
             continue
@@ -1530,21 +1480,19 @@ def render_context_notes(notes: List[Tuple[str, str, str]]) -> None:
                        f"{html.escape(detail or '')}")
 
 # ─────────────────────────────────────────────────────────────
-# ADMIN — throttle + pagination
+# ADMIN
 # ─────────────────────────────────────────────────────────────
 def _admin_ok(pwd: str) -> bool:
     """
     Auth admin 3 mode (urut prioritas):
-    1. ADMIN_PASSWORD (plaintext) di secrets → paling mudah untuk testing
-    2. ADMIN_PASSWORD_HASH (sha256) di secrets → backward compatible v5.3.0
-    3. Fallback default "admin" → HANYA prototype, WAJIB diganti di produksi
+    1. ADMIN_PASSWORD (plaintext) di secrets
+    2. ADMIN_PASSWORD_HASH (sha256) di secrets
+    3. Fallback prototype: ADMIN_FALLBACK_PASSWORD
     """
-    # Mode 1: plaintext di secrets
     plain = _get_secret("ADMIN_PASSWORD", "ADMIN_PIN", "ADMIN_PWD")
     if plain:
         return pwd == plain
 
-    # Mode 2: hash di secrets (v5.3.0 lama)
     exp_hash = _get_secret("ADMIN_PASSWORD_HASH")
     if exp_hash and len(exp_hash) == 64:
         try:
@@ -1552,11 +1500,9 @@ def _admin_ok(pwd: str) -> bool:
         except Exception:  # noqa: BLE001
             return False
 
-    # Mode 3: fallback prototype — password: admin
-    return pwd == "@Dm1n!"
+    return pwd == ADMIN_FALLBACK_PASSWORD
 
 def _admin_attempt_allowed() -> bool:
-    """Throttle: maks 5 percobaan / 5 menit."""
     now = time.time()
     attempts: List[float] = st.session_state.get("_admin_attempts", [])
     attempts = [t for t in attempts if now - t < ADMIN_LOCKOUT_SEC]
@@ -1568,10 +1514,9 @@ def _admin_attempt_allowed() -> bool:
     return True
 
 def render_admin_analytics() -> None:
-    # Tidak ada guard secret — fallback "admin" selalu tersedia
     if not st.session_state.get("is_admin"):
-        st.caption("🔓 **Prototype mode** — login: `admin` "
-                   "(ganti nanti via secrets `ADMIN_PASSWORD`)")
+        st.caption(f"🔓 **Prototype mode** — login: `{ADMIN_FALLBACK_PASSWORD}` "
+                   f"(ganti nanti via secrets `ADMIN_PASSWORD`)")
         pwd = st.text_input("Password Admin", type="password", key="admin_pwd")
         if st.button("🔓 Login", use_container_width=False):
             if not _admin_attempt_allowed():
@@ -1615,7 +1560,6 @@ def render_admin_analytics() -> None:
         if "timestamp_utc" in df.columns:
             df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], errors="coerce")
 
-        # Bug fix: query_success (dengan isin untuk kompatibilitas)
         if "feature" in df.columns:
             qs = df[df["feature"].isin(["query_success", "querysuccess"])]
             fb = df[df["feature"] == "feedback"]
@@ -1633,7 +1577,6 @@ def render_admin_analytics() -> None:
         c4.metric("👍 / 👎", f"{fb_up} / {fb_down}")
         c5.metric("Rating positif", f"{(fb_up / max(1, fb_up + fb_down) * 100):.0f}%")
 
-        # Response time stats (jika kolom ada)
         if "response_time_ms" in qs.columns and not qs.empty:
             try:
                 rt = pd.to_numeric(qs["response_time_ms"], errors="coerce").dropna()
@@ -1698,7 +1641,6 @@ for k, v in _DEFAULTS.items():
         st.session_state[k] = v
 generate_session_id()
 
-# Deep linking
 _q = st.query_params
 if _q.get("prompt"):
     st.session_state["prompt_history"] = _q["prompt"]
@@ -1732,17 +1674,13 @@ st.markdown(f"""
 # ─────────────────────────────────────────────────────────────
 # EXECUTE QUERY
 # ─────────────────────────────────────────────────────────────
-def _execute_query(
-    prompt_text: str,
-    files_payload: List[Tuple[str, str, bytes]],
-    search_context: str,
-    sources_used: List[str],
-    web_used: bool,
-    spec_used: bool,
-) -> None:
+def _execute_query(prompt_text: str,
+                   files_payload: List[Tuple[str, str, bytes]],
+                   search_context: str,
+                   sources_used: List[str],
+                   web_used: bool, spec_used: bool) -> None:
     lang_key = st.session_state.get("answer_lang", "id")
     lang_rule = LANG_INSTRUCTIONS.get(lang_key, LANG_INSTRUCTIONS["id"])
-
     research_block = (RESEARCH_MODE_INSTRUCTION
                       if st.session_state.get("enable_research_mode") else "")
 
@@ -1968,7 +1906,6 @@ if nav == "💬 Chat":
                    web_search=st.session_state["enable_web_search"],
                    specialized=st.session_state["enable_specialized_apac"])
 
-        # Validasi ukuran file
         files_payload, upload_warnings = validate_upload_size(uploaded_files or [])
         for w in upload_warnings:
             st.warning(w)
@@ -1991,7 +1928,6 @@ if nav == "💬 Chat":
             "sources": sources, "notes": notes,
             "w_used": w_used, "s_used": s_used}
 
-    # Handle pending_query
     pq = st.session_state.get("pending_query")
     if pq:
         raw = pq["raw"]
@@ -2037,7 +1973,6 @@ if nav == "💬 Chat":
             st.session_state["pending_query"] = None
             render_context_notes(pq["notes"])
 
-    # Riwayat + feedback + export
     if st.session_state["chat_history"]:
         st.markdown("---")
         st.subheader("📜 Riwayat Percakapan")
@@ -2143,9 +2078,9 @@ elif nav == "🔍 Search & RAG":
         st.session_state["enable_web_search"] = st.checkbox(
             "Aktifkan web search umum", value=st.session_state["enable_web_search"])
         if not DDG_AVAILABLE:
-            st.error(f"❌ duckduckgo-search tidak tersedia: {DDG_ERROR}")
+            st.error(f"❌ ddgs tidak tersedia: {DDG_ERROR}")
         else:
-            st.success("✅ duckduckgo-search tersedia")
+            st.success("✅ ddgs tersedia")
             test_q = st.text_input("Test query", value="data center Indonesia 2026")
             if st.button("🔎 Test Search", use_container_width=False):
                 with st.spinner("Mencari..."):
@@ -2244,7 +2179,7 @@ elif nav == "📊 Logs & Analytics":
 | SUPABASE_URL | {'✅' if _get_secret('SUPABASE_URL') else '❌'} |
 | SUPABASE_KEY (anon) | {'✅' if _get_secret('SUPABASE_KEY', 'SUPABASE_ANON_KEY') else '❌'} |
 | SUPABASE_SERVICE_KEY | {'✅' if _get_secret('SUPABASE_SERVICE_KEY') else '—'} |
-| ADMIN_PASSWORD_HASH | {'✅' if _get_secret('ADMIN_PASSWORD_HASH') else '❌'} |
+| ADMIN_PASSWORD | {'✅' if _get_secret('ADMIN_PASSWORD') else f'⚠️ (fallback: {ADMIN_FALLBACK_PASSWORD})'} |
 """)
 
         st.markdown("### 📋 Log Terbaru (via session ini)")
@@ -2267,9 +2202,15 @@ elif nav == "📊 Logs & Analytics":
 elif nav == "ℹ️ Diagnostics":
     st.header("ℹ️ System Diagnostics")
 
+    st.markdown("### 🌐 Sumber Kurasi (GitHub Pages)")
+    st.markdown(f"- **Base URL:** `{GITHUB_PAGES_BASE}`")
+    st.markdown(f"- **Site domain (DDG):** `{SITE_DOMAIN}`")
+    st.markdown(f"- [Live DC ASPAC]({SPECIALIZED_SOURCES['dc']['url']})")
+    st.markdown(f"- [Live FO & Subsea ASPAC]({SPECIALIZED_SOURCES['fo']['url']})")
+
     st.markdown("### 📦 Optional Dependencies")
     deps = [
-        ("duckduckgo-search", DDG_AVAILABLE, DDG_ERROR),
+        ("ddgs", DDG_AVAILABLE, DDG_ERROR),
         ("beautifulsoup4", BS4_AVAILABLE, BS4_ERROR),
         ("supabase", SUPABASE_AVAILABLE, SUPABASE_ERROR),
         ("fpdf2", FPDF_AVAILABLE, FPDF_ERROR),
@@ -2344,5 +2285,5 @@ st.caption(
     f"Theme: {_detect_theme()} · "
     f"Context Guard ±{MAX_CONTEXT_CHARS:,} char · "
     f"RAG {'TF-IDF' if SKLEARN_AVAILABLE else 'keyword'} · "
-    f"Sources: Live DC & FO/Subsea ASPAC"
+    f"Sources: GitHub Pages Live DC & FO/Subsea ASPAC"
 )
