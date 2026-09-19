@@ -95,7 +95,7 @@ import streamlit as st
 # ─────────────────────────────────────────────────────────────
 DDG_AVAILABLE, DDG_ERROR = False, ""
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
     DDG_AVAILABLE = True
 except Exception as e:  # noqa: BLE001
     DDG_ERROR = str(e)[:120]
