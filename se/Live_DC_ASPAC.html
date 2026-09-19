@@ -1361,12 +1361,33 @@ function liveCardHTML(it, idx, label){
 function wireLive(viewId){
   const b = document.getElementById("btnLive");
   if(b) b.onclick = () => runLive(viewId);
-  runLive(viewId);
+  // [PATCH C] Coba Supabase dulu, kalau kosong baru GDELT
+  renderLiveFromSupabase(viewId).then(() => {
+    const nb = document.getElementById("liveNews");
+    const isEmpty = !nb || nb.querySelector(".live-note");
+    if(isEmpty) runLive(viewId);
+  });
 }
+  
 async function runLive(viewId){
   const st = document.getElementById("liveStatus"), nb = document.getElementById("liveNews"), rb = document.getElementById("liveResearch");
   if(!st) return;
-  st.innerHTML = "📡 Menghubungi mesin pencari realtime…";
+
+  // [PATCH B] Cek cache dulu — tidak fetch ulang jika masih segar (30 menit)
+  const CACHE_KEY = "dcLiveCache_" + viewId;
+  const CACHE_TTL = 30 * 60 * 1000;
+  let cached = null;
+  try{ cached = JSON.parse(localStorage.getItem(CACHE_KEY)); }catch(e){}
+  const fresh = cached && (Date.now() - cached.at) < CACHE_TTL;
+
+  if(fresh){
+    st.innerHTML = "⚡ Live dari cache lokal (30 menit) — klik ⚡ Ulangi Live untuk fetch ulang dari GDELT/Bing.";
+    nb.innerHTML = cached.nCur.map((it,i) => liveCardHTML(Object.assign({}, it, {date: new Date(it.date)}),i,"LIVE BERITA")).join("") || '<div class="live-note">⚠️ Kosong.</div>';
+    rb.innerHTML = cached.rCur.map((it,i) => liveCardHTML(Object.assign({}, it, {date: new Date(it.date)}),i,"LIVE RISET")).join("") || '<div class="live-note">⚠️ Kosong.</div>';
+    return;
+  }
+
+  st.innerHTML = "📡 Menghubungi GDELT + Bing News + OpenAlex…";
   const cfg = liveConfig(viewId);
   const res = await Promise.allSettled([fetchRssItems(cfg.newsQ, 60), fetchOpenAlex(cfg.resQ, LIVE_WINDOW.startISO)]);
   const nRaw = res[0].status === "fulfilled" ? res[0].value : null;
@@ -1378,10 +1399,52 @@ async function runLive(viewId){
     if(sum.length > 320) sum = sum.slice(0, 317).trim() + "…";
     return Object.assign({}, x, { summary: sum, matched: (x.matched || cfg.kwords).slice(0,5) });
   }) : [];
-  nb.innerHTML = nCur.length ? nCur.map((it,i) => liveCardHTML(it,i,"LIVE BERITA")).join("") : '<div class="live-note">⚠️ RSS/proxy tidak tersedia — memakai cache Supabase/lokal pada kartu utama.</div>';
-  rb.innerHTML = rCur.length ? rCur.map((it,i) => liveCardHTML(it,i,"LIVE RISET")).join("") : '<div class="live-note">⚠️ OpenAlex kosong pada jendela ini.</div>';
-  st.innerHTML = "✅ Live: "+(nRaw?nRaw.length:0)+" mentah → "+nCur.length+" berita; "+(rRaw?rRaw.length:0)+" → "+rCur.length+" riset. Setiap kartu dilengkapi 4 sub-kategori (📐 Standar / 🌐 ITU / 📚 Riset / 🇮🇩 Regulasi ID) — klik untuk mencari tanpa batas periode.";
+
+  // [PATCH B] Simpan ke cache lokal
+  try{ localStorage.setItem(CACHE_KEY, JSON.stringify({at: Date.now(), nCur, rCur})); }catch(e){}
+
+  // [PATCH A] Auto-save ke Supabase (admin)
+  if(isAdmin() && (nCur.length || rCur.length)){
+    try{
+      const liveRows = [];
+      const pushLive = (it, kind) => {
+        const an = { summary: ensureMinSummary(it), klasifikasi: (AC_TOPIC_KLAS.find(m => m.re.test(it.title)) || {k:"A"}).k,
+          country: acGuessCountry(it.title), is_indonesia: isIndonesiaLive(it), dr: liveDrills(it),
+          hashtags: (it.matched||[]).slice(0,5).map(m => "#"+m.replace(/[^a-z0-9]+/gi,"_")), ai: false };
+        liveRows.push(mapToRow(it, kind, an.klasifikasi, an));
+      };
+      nCur.forEach(it => pushLive(it, "news"));
+      rCur.forEach(it => pushLive(it, "research"));
+      const saved = await sbUpsert("dc_items", liveRows, "content_hash");
+      if(saved) console.log("[Live→Supabase] ✅ " + liveRows.length + " item tersimpan");
+    }catch(e){ console.warn("[Live→Supabase]", e.message); }
+  }
+
+  nb.innerHTML = nCur.length ? nCur.map((it,i) => liveCardHTML(it,i,"LIVE BERITA")).join("") : '<div class="live-note">⚠️ RSS/proxy tidak tersedia.</div>';
+  rb.innerHTML = rCur.length ? rCur.map((it,i) => liveCardHTML(it,i,"LIVE RISET")).join("") : '<div class="live-note">⚠️ OpenAlex kosong.</div>';
+  st.innerHTML = "✅ Live: "+(nRaw?nRaw.length:0)+" mentah → "+nCur.length+" berita; "+(rRaw?rRaw.length:0)+" → "+rCur.length+" riset. Tersimpan ke cache lokal" + (isAdmin() ? " + Supabase" : " (read-only)") + ".";
 }
+
+// [PATCH C] Visitor baca dari Supabase dulu sebelum fetch GDELT
+async function renderLiveFromSupabase(viewId){
+  const st = document.getElementById("liveStatus"), nb = document.getElementById("liveNews"), rb = document.getElementById("liveResearch");
+  if(!st || !nb || !rb) return;
+
+  // Ambil dari cache Supabase yang sudah di-load di boot
+  const sbCache = sbCacheLoad();
+  if(!sbCache || !sbCache.data) return;
+
+  const parents = sbCache.data.parents || [];
+  const news = parents.filter(p => p.feed_type === "news").slice(0, 6).map(rowToCard);
+  const research = parents.filter(p => p.feed_type === "research").slice(0, 4).map(rowToCard);
+
+  if(!news.length && !research.length) return; // supabase kosong, biarkan runLive ambil GDELT
+
+  st.innerHTML = "☁️ Live dari Supabase (data tersimpan admin). Klik ⚡ Ulangi Live untuk fetch GDELT terbaru.";
+  nb.innerHTML = news.length ? news.map((it,i) => liveCardHTML({title:it.j, link:it.u, src:it.src, date: new Date(it.tglISO||it.tgl), matched:it.h.map(h=>h.replace(/^#/,"")), summary:it.r},i,"SUPABASE")).join("") : '<div class="live-note">⚠️ Belum ada news di Supabase.</div>';
+  rb.innerHTML = research.length ? research.map((it,i) => liveCardHTML({title:it.j, link:it.u, src:it.src, date: new Date(it.tglISO||it.tgl), matched:it.h.map(h=>h.replace(/^#/,"")), summary:it.r},i,"SUPABASE RISET")).join("") : '<div class="live-note">⚠️ Belum ada riset di Supabase.</div>';
+}
+  
 function renderKlas(id){
   const k = KLAS.find(x => x.id === id), list = k.hasil.filter(matchFilter);
   main.innerHTML = '<div class="view-head"><div class="kicker-row"><div class="kicker">Klasifikasi '+k.id+'</div>'+viewShareButton(id)+'</div><h2>'+k.ico+' '+esc(k.nama)+'</h2><div class="periode"><strong>Periode '+PERIODE.mulai+' s.d. '+PERIODE.akhir+'</strong> tentang <strong>'+esc(k.nama)+'</strong> di '+k.negara.join(" • ")+' — dilengkapi auto-kurasi + 4 sub-pencarian dari Supabase.</div><div class="definisi"><b>Definisi:</b> '+esc(k.definisi)+'</div><div class="negara-chips">'+k.negara.map(n => '<span>'+n+'</span>').join("")+'</div></div>'+
